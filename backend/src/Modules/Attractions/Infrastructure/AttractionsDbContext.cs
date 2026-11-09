@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SightseeingTravel.Modules.Attractions.Domain;
+using SightseeingTravel.Persistence;
 
 namespace SightseeingTravel.Modules.Attractions.Infrastructure;
 
@@ -104,5 +105,7 @@ public sealed class AttractionsDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("UX_poi_localizations_poi_lang");
         });
+
+        modelBuilder.ApplySnakeCaseColumnNames();
     }
 }

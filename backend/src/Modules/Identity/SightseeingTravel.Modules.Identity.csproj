@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\SightseeingTravel.SharedKernel\SightseeingTravel.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\SightseeingTravel.Persistence\SightseeingTravel.Persistence.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SightseeingTravel.Modules.ArExperience.Domain;
+using SightseeingTravel.Persistence;
 
 namespace SightseeingTravel.Modules.ArExperience.Infrastructure;
 
@@ -92,5 +93,7 @@ public sealed class ArExperienceDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("UX_ar_card_localizations_card_lang");
         });
+
+        modelBuilder.ApplySnakeCaseColumnNames();
     }
 }

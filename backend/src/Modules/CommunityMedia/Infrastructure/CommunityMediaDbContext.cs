@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SightseeingTravel.Modules.CommunityMedia.Domain;
+using SightseeingTravel.Persistence;
 
 namespace SightseeingTravel.Modules.CommunityMedia.Infrastructure;
 
@@ -95,5 +96,7 @@ public sealed class CommunityMediaDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("UX_photo_reports_photo_reporter");
         });
+
+        modelBuilder.ApplySnakeCaseColumnNames();
     }
 }

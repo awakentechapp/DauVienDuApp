@@ -10,6 +10,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{10000000
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SightseeingTravel.SharedKernel", "src\SightseeingTravel.SharedKernel\SightseeingTravel.SharedKernel.csproj", "{20000000-0000-0000-0000-000000000001}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SightseeingTravel.Persistence", "src\SightseeingTravel.Persistence\SightseeingTravel.Persistence.csproj", "{20000000-0000-0000-0000-000000000007}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SightseeingTravel.Modules.Identity", "src\Modules\Identity\SightseeingTravel.Modules.Identity.csproj", "{20000000-0000-0000-0000-000000000002}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SightseeingTravel.Modules.Attractions", "src\Modules\Attractions\SightseeingTravel.Modules.Attractions.csproj", "{20000000-0000-0000-0000-000000000003}"
@@ -31,6 +33,7 @@ Global
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{20000000-0000-0000-0000-000000000001} = {10000000-0000-0000-0000-000000000001}
+		{20000000-0000-0000-0000-000000000007} = {10000000-0000-0000-0000-000000000001}
 		{10000000-0000-0000-0000-000000000002} = {10000000-0000-0000-0000-000000000001}
 		{20000000-0000-0000-0000-000000000002} = {10000000-0000-0000-0000-000000000002}
 		{20000000-0000-0000-0000-000000000003} = {10000000-0000-0000-0000-000000000002}

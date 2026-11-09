@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SightseeingTravel.Modules.Identity.Domain;
+using SightseeingTravel.Persistence;
 
 namespace SightseeingTravel.Modules.Identity.Infrastructure;
 
@@ -109,5 +110,7 @@ public sealed class IdentityDbContext : DbContext
 
             builder.Ignore(rt => rt.IsActive);
         });
+
+        modelBuilder.ApplySnakeCaseColumnNames();
     }
 }
