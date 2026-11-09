@@ -17,8 +17,8 @@ public static class CommunityMediaModuleExtensions
     {
         var connectionString =
             configuration.GetConnectionString("DefaultConnection") ??
-            configuration["Database:ConnectionString"] ??
-            "Host=localhost;Port=5432;Database=sightseeing_travel;Username=postgres;Password=postgres";
+            configuration.GetConnectionString("Database") ??
+            throw new InvalidOperationException("Database connection string is not configured for Community Media module.");
 
         return services.AddCommunityMediaModule(connectionString);
     }

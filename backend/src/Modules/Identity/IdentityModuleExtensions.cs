@@ -18,7 +18,7 @@ public static class IdentityModuleExtensions
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? configuration.GetConnectionString("Database")
-            ?? "Host=localhost;Port=5432;Database=sightseeing_travel;Username=postgres;Password=postgres";
+            ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required for the Identity module.");
 
         services.AddDbContext<IdentityDbContext>(options =>
         {

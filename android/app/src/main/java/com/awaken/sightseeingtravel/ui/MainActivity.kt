@@ -417,7 +417,7 @@ private fun HomeTabScreen(
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.logo_ngang_kem_dao),
-                        contentDescription = "Sightseeing Travel - Dấu viễn du",
+                    contentDescription = "Dấu Viễn Du",
                         modifier = Modifier
                             .height(38.dp)
                             .wrapContentWidth(Alignment.Start)
@@ -1644,12 +1644,12 @@ private fun InfoAndProfileTabScreen(
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.tem_do_gach),
-                    contentDescription = "Sightseeing Travel Stamp",
+                        contentDescription = "Dấu Viễn Du",
                     modifier = Modifier.size(46.dp)
                 )
                 Column {
                     Text(
-                        text = "Sightseeing Travel",
+                        text = "Dấu Viễn Du",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = Color(0xFF622821)
@@ -1951,7 +1951,7 @@ private fun AuthAndRoleDialog(
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.logo_doc_do_gach),
-                    contentDescription = "Sightseeing Travel Logo",
+                    contentDescription = "Logo Dấu Viễn Du",
                     modifier = Modifier
                         .height(84.dp)
                         .padding(bottom = 6.dp)
@@ -1962,7 +1962,7 @@ private fun AuthAndRoleDialog(
                     } else if (isRegisterMode) {
                         if (isEn) "Register Tourist Account" else "Đăng ký Du khách"
                     } else {
-                        if (isEn) "Sign In (Sightseeing Travel)" else "Đăng Nhập Hệ Thống"
+                        if (isEn) "Sign In (Dấu Viễn Du)" else "Đăng Nhập Hệ Thống"
                     },
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp

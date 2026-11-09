@@ -46,7 +46,7 @@ public actor APIClient {
         } else if let envUrl = ProcessInfo.processInfo.environment["SIGHTSEEING_API_BASE_URL"], !envUrl.isEmpty {
             self.baseURLString = envUrl
         } else {
-            self.baseURLString = "http://localhost:5000/api/v1"
+            self.baseURLString = "https://dauviendu.awaken.asia/api/v1"
         }
 
         let config = URLSessionConfiguration.default

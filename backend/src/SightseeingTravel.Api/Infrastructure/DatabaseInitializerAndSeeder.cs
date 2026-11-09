@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using SightseeingTravel.Modules.ArExperience.Domain;
 using SightseeingTravel.Modules.ArExperience.Infrastructure;
 using SightseeingTravel.Modules.Attractions.Domain;
@@ -12,9 +14,8 @@ using SightseeingTravel.SharedKernel.Domain;
 namespace SightseeingTravel.Api.Infrastructure;
 
 /// <summary>
-/// Centralized database initializer and data seeder owned exclusively by the Main/Integration Task.
-/// Seeds the 3 default roles (SuperAdmin, Admin, Tourist), sample Cultural POIs (Published & PendingApproval),
-/// multilingual stories ('vi', 'en'), AR Info Cards, and sample community photos.
+/// Initializes the modular PostgreSQL schemas, provisions the first SuperAdmin from deployment configuration,
+/// and seeds sample cultural content only outside Production.
 /// </summary>
 public static class DatabaseInitializerAndSeeder
 {
@@ -27,6 +28,8 @@ public static class DatabaseInitializerAndSeeder
         var arDb = services.GetRequiredService<ArExperienceDbContext>();
         var mediaDb = services.GetRequiredService<CommunityMediaDbContext>();
         var passwordHasher = services.GetRequiredService<PasswordHasher>();
+        var configuration = services.GetRequiredService<IConfiguration>();
+        var environment = services.GetRequiredService<IHostEnvironment>();
 
         await identityDb.Database.EnsureCreatedAsync(cancellationToken);
         await attractionsDb.Database.EnsureCreatedAsync(cancellationToken);
@@ -35,41 +38,49 @@ public static class DatabaseInitializerAndSeeder
 
         var now = DateTimeOffset.UtcNow;
 
-        User superAdmin;
-        User admin;
-        User tourist;
+        var superAdmin = await identityDb.Users
+            .FirstOrDefaultAsync(u => u.Role == UserRole.SuperAdmin, cancellationToken);
 
-        // 1. Seed 3 Dedicated Test Accounts (SuperAdmin: sa, Admin: testadmin, Tourist: testapp)
-        if (!await identityDb.Users.AnyAsync(cancellationToken))
+        if (superAdmin is null)
         {
+            var bootstrapEmail = configuration["BootstrapAdmin:Email"]?.Trim();
+            var bootstrapPassword = configuration["BootstrapAdmin:Password"];
+
+            if (string.IsNullOrWhiteSpace(bootstrapEmail)
+                || string.IsNullOrWhiteSpace(bootstrapPassword)
+                || bootstrapPassword.Length < 12)
+            {
+                throw new InvalidOperationException(
+                    "BootstrapAdmin:Email and a BootstrapAdmin:Password of at least 12 characters are required when no SuperAdmin exists.");
+            }
+
+            bootstrapEmail = User.NormalizeEmail(bootstrapEmail);
+
+            if (await identityDb.Users.AnyAsync(u => u.Email == bootstrapEmail, cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "The bootstrap administrator email already belongs to a non-SuperAdmin account.");
+            }
+
             superAdmin = User.CreateStaff(
-                "sa",
-                passwordHasher.HashPassword("AwakenTech150520#"),
-                "Chủ Quản Hệ Thống (sa)",
+                bootstrapEmail,
+                passwordHasher.HashPassword(bootstrapPassword),
+                "Quản trị viên hệ thống",
                 UserRole.SuperAdmin,
                 SupportedLanguages.Vietnamese);
 
-            admin = User.CreateStaff(
-                "testadmin",
-                passwordHasher.HashPassword("TestApp123456"),
-                "Quản Trị Viên Nội Dung (testadmin)",
-                UserRole.Admin,
-                SupportedLanguages.Vietnamese);
-
-            tourist = User.CreateTourist(
-                "testapp",
-                passwordHasher.HashPassword("TestApp123456"),
-                "Du Khách Kiểm Thử (testapp)",
-                SupportedLanguages.Vietnamese);
-
-            identityDb.Users.AddRange(superAdmin, admin, tourist);
+            identityDb.Users.Add(superAdmin);
             await identityDb.SaveChangesAsync(cancellationToken);
         }
-        else
+
+        var admin = await identityDb.Users
+            .FirstOrDefaultAsync(u => u.Role == UserRole.Admin, cancellationToken) ?? superAdmin;
+        var tourist = await identityDb.Users
+            .FirstOrDefaultAsync(u => u.Role == UserRole.Tourist, cancellationToken) ?? superAdmin;
+
+        if (environment.IsProduction())
         {
-            superAdmin = await identityDb.Users.FirstAsync(u => u.Role == UserRole.SuperAdmin, cancellationToken);
-            admin = await identityDb.Users.FirstAsync(u => u.Role == UserRole.Admin, cancellationToken);
-            tourist = await identityDb.Users.FirstAsync(u => u.Role == UserRole.Tourist, cancellationToken);
+            return;
         }
 
         // 2. Seed Cultural POIs (Published & PendingApproval)
@@ -93,8 +104,8 @@ public static class DatabaseInitializerAndSeeder
                 activationRadiusMeters: 150.0,
                 coverImageUrl: "https://sin1.contabostorage.com/sightseeing-media/pois/hoang-thanh/official/cover.jpg",
                 createdBy: admin.Id,
-                creatorRole: UserRole.Admin,
-                saveAsDraft: false,
+                creatorRole: admin.Role,
+                saveAsDraft: admin.Role != UserRole.Admin,
                 now: now);
 
             if (thapRuaResult.IsSuccess && pendingByAdminResult.IsSuccess)

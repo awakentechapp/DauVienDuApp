@@ -1,6 +1,6 @@
-# SIGHTSEEING TRAVEL (v1.1) — Cultural Discovery, GPS Map, AR Camera & Community Photo Platform
+# DẤU VIỄN DU (v1.1) — Cultural Discovery, GPS Map, AR Camera & Community Photo Platform
 
-**SIGHTSEEING TRAVEL (Dấu viễn du — Phiên bản v1.1)** là nền tảng du lịch văn hóa đa ngôn ngữ (`vi` / `en`) dành cho du khách quốc tế và nội địa, kết hợp định vị bản đồ GPS thời gian thực, công nghệ Thực tế tăng cường (AR Camera) hiển thị câu chuyện văn hóa và những bức ảnh đẹp nhất của cộng đồng ngay tại điểm đến, cùng quy trình quản trị và phê duyệt 3 cấp (`Tourist`, `Admin`, `SuperAdmin`).
+**Dấu Viễn Du (phiên bản v1.1)** là nền tảng du lịch văn hóa đa ngôn ngữ (`vi` / `en`) dành cho du khách quốc tế và nội địa, kết hợp định vị bản đồ GPS thời gian thực, công nghệ Thực tế tăng cường (AR Camera) hiển thị câu chuyện văn hóa và những bức ảnh đẹp nhất của cộng đồng ngay tại điểm đến, cùng quy trình quản trị và phê duyệt 3 cấp (`Tourist`, `Admin`, `SuperAdmin`).
 
 ---
 
@@ -19,7 +19,7 @@
 ## 2. Cấu trúc Thư mục Dự án
 
 ```text
-SIGHTSEEING TRAVEL/
+DauVienDuApp/
 ├── backend/
 │   ├── SightseeingTravel.sln
 │   ├── Dockerfile
@@ -42,29 +42,29 @@ SIGHTSEEING TRAVEL/
 │   ├── build.gradle.kts
 │   └── app/                                        # Kotlin + Jetpack Compose + MapLibre/OpenFreeMap/OSM + AR Camera
 ├── deploy/
-│   └── nginx/nginx.conf                            # Reverse Proxy cấu hình cho VPS Contabo
-├── docker-compose.yml                              # Khởi chạy trọn bộ PostgreSQL 16 + ASP.NET Core API + Nginx
+│   └── nginx/nginx.conf                            # Mẫu reverse proxy thay thế khi không dùng FlashPanel
+├── docker-compose.yml                              # FlashPanel PostgreSQL 18 + ASP.NET Core API; FlashPanel quản lý HTTPS/reverse proxy
 └── .env.example                                    # Cấu hình mẫu cho VPS Contabo & Contabo Object Storage
 ```
 
 ---
 
-## 3. Hướng dẫn Triển khai trên VPS Contabo & Contabo Object Storage
+## 3. Hướng dẫn triển khai trên VPS Contabo qua FlashPanel
 
 1. Sao chép file cấu hình môi trường:
    ```bash
    cp .env.example .env
    ```
-2. Cập nhật thông tin **Contabo Object Storage** (`CONTABO_S3_SERVICE_URL`, `CONTABO_S3_BUCKET_NAME`, `CONTABO_S3_ACCESS_KEY`, `CONTABO_S3_SECRET_KEY`) và mật khẩu PostgreSQL trong `.env`.
+2. Cấu hình `.env` cho database/user PostgreSQL `awkdvd` đã tạo trong FlashPanel, gồm mật khẩu database, `JWT_SIGNING_KEY`, email SuperAdmin khởi tạo và mật khẩu bootstrap. Tạo `JWT_SIGNING_KEY` ngẫu nhiên tối thiểu 32 byte, ví dụ bằng `openssl rand -hex 32`. Điền thông tin **Contabo Object Storage** (`CONTABO_S3_SERVICE_URL`, `CONTABO_S3_BUCKET_NAME`, `CONTABO_S3_ACCESS_KEY`, `CONTABO_S3_SECRET_KEY`) nếu bật upload ảnh.
 3. Khởi chạy bằng Docker Compose:
    ```bash
    docker compose up -d --build
    ```
-4. Truy cập tài liệu OpenAPI / Swagger UI tại: `http://<vps-ip>/swagger`
-5. Tài khoản mặc định được khởi tạo tự động (Data Seeder):
-   - **SuperAdmin:** `superadmin@sightseeing.vn` / `SuperAdmin@123`
-   - **Admin:** `admin@sightseeing.vn` / `Admin@12345`
-   - **Tourist:** `tourist@sightseeing.vn` / `Tourist@123`
+4. Compose dùng PostgreSQL FlashPanel hiện có trên loopback. API container dùng host networking và chỉ lắng nghe `127.0.0.1:8080`; cấu hình site `dauviendu.awaken.asia` reverse proxy tới `http://127.0.0.1:8080` và giữ TLS đang cài.
+5. Khi database chưa có SuperAdmin, API tạo một tài khoản từ `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD`. Sau khi đăng nhập quản trị lần đầu, xóa `BOOTSTRAP_ADMIN_PASSWORD` khỏi cấu hình môi trường của VPS.
+6. Truy cập OpenAPI / Swagger tại `https://dauviendu.awaken.asia/swagger`.
+
+Production không tự tạo tài khoản mẫu hoặc POI demo. Hãy tạo POI thực tế từ trang quản trị sau khi khởi tạo SuperAdmin.
 
 ---
 

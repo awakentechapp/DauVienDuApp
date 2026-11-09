@@ -19,7 +19,7 @@ android {
             useSupportLibrary = true
         }
 
-        buildConfigField("String", "API_BASE_URL", "\"https://api.sightseeingtravel.awaken.vn/\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://dauviendu.awaken.asia/\"")
         buildConfigField("String", "OPENFREEMAP_STYLE_URL", "\"https://tiles.openfreemap.org/styles/bright\"")
     }
 

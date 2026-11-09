@@ -18,7 +18,6 @@ public static class AttractionsModuleExtensions
         var connectionString =
             configuration.GetConnectionString("DefaultConnection") ??
             configuration.GetConnectionString("Database") ??
-            configuration["Database:ConnectionString"] ??
             throw new InvalidOperationException("Database connection string is not configured for Attractions module.");
 
         return services.AddAttractionsModule(connectionString);

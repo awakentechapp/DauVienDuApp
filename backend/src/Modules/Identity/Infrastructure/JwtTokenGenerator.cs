@@ -14,7 +14,7 @@ public sealed class JwtOptions
 
     public string Issuer { get; set; } = "SightseeingTravel.Api";
     public string Audience { get; set; } = "SightseeingTravel.Client";
-    public string SigningKey { get; set; } = "SightseeingTravel_Default_Super_Secret_Signing_Key_2026!";
+    public string SigningKey { get; set; } = string.Empty;
     public int AccessTokenExpirationMinutes { get; set; } = 60;
     public int RefreshTokenExpirationDays { get; set; } = 14;
 }

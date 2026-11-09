@@ -15,26 +15,22 @@ public static class ArExperienceModuleExtensions
         IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection")
-                               ?? configuration["Database:ConnectionString"];
+                               ?? configuration.GetConnectionString("Database")
+                               ?? throw new InvalidOperationException("Database connection string is not configured for AR Experience module.");
 
         return services.AddArExperienceModule(connectionString);
     }
 
     public static IServiceCollection AddArExperienceModule(
         this IServiceCollection services,
-        string? connectionString)
+        string connectionString)
     {
         services.AddDbContext<ArExperienceDbContext>(options =>
-        {
-            if (!string.IsNullOrWhiteSpace(connectionString))
-            {
-                options.UseNpgsql(
-                    connectionString,
-                    npgsql => npgsql.MigrationsHistoryTable(
-                        "__EFMigrationsHistory",
-                        ArExperienceDbContext.SchemaName));
-            }
-        });
+            options.UseNpgsql(
+                connectionString,
+                npgsql => npgsql.MigrationsHistoryTable(
+                    "__EFMigrationsHistory",
+                    ArExperienceDbContext.SchemaName)));
 
         services.AddScoped<IArExperienceService, ArExperienceService>();
 

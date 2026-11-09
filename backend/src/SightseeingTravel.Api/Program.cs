@@ -33,6 +33,12 @@ builder.Services.AddCommunityMediaModule(builder.Configuration);
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
                  ?? new JwtOptions();
 
+if (Encoding.UTF8.GetByteCount(jwtOptions.SigningKey) < 32)
+{
+    throw new InvalidOperationException(
+        "Jwt:SigningKey must be configured with at least 32 bytes before the API can start.");
+}
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -85,7 +91,7 @@ builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "SIGHTSEEING TRAVEL API",
+        Title = "Dấu Viễn Du API",
         Version = "v1",
         Description = "Modular Monolith Backend API for Cultural Sightseeing, GPS Discovery, AR Camera & Community Photo Sharing."
     });
@@ -117,7 +123,7 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Sightseeing Travel API v1");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Dấu Viễn Du API v1");
     c.RoutePrefix = "swagger";
 });
 

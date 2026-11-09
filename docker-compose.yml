@@ -1,61 +1,48 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: sightseeing-postgres
-    restart: unless-stopped
+  db-init:
+    image: postgres:18-alpine
+    container_name: dauviendu-db-init
+    network_mode: host
+    restart: "no"
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-sightseeing_travel}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secret_password}
-    ports:
-      - "5432:5432"
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-awkdvd}
+      PGUSER: ${POSTGRES_USER:-awkdvd}
+      PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/src/SightseeingTravel.Api/Migrations/0001_InitialModularMonolithSchema.sql:/docker-entrypoint-initdb.d/0001_InitialModularMonolithSchema.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-sightseeing_travel}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      - ./backend/src/SightseeingTravel.Api/Migrations/0001_InitialModularMonolithSchema.sql:/schema.sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until pg_isready -h "$$PGHOST" -p "$$PGPORT" -U "$$PGUSER" -d "$$PGDATABASE"; do sleep 2; done;
+        psql -v ON_ERROR_STOP=1 -f /schema.sql
 
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: sightseeing-api
+    container_name: dauviendu-api
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    network_mode: host
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-sightseeing_travel};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres_secret_password}"
-      ConnectionStrings__Database: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-sightseeing_travel};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres_secret_password}"
+      ASPNETCORE_URLS: "http://127.0.0.1:8080"
+      ConnectionStrings__DefaultConnection: "Host=127.0.0.1;Port=5432;Database=${POSTGRES_DB:-awkdvd};Username=${POSTGRES_USER:-awkdvd};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Database__ApplyMigrationsAndSeedOnStartup: "true"
+      BootstrapAdmin__Email: "${BOOTSTRAP_ADMIN_EMAIL:-}"
+      BootstrapAdmin__Password: "${BOOTSTRAP_ADMIN_PASSWORD:-}"
       Jwt__Issuer: "${JWT_ISSUER:-SightseeingTravel.Api}"
       Jwt__Audience: "${JWT_AUDIENCE:-SightseeingTravel.Clients}"
-      Jwt__SigningKey: "${JWT_SIGNING_KEY:-SightseeingTravel_SuperSecret_JwtSigningKey_2026_Minimum32Bytes!}"
+      Jwt__SigningKey: "${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}"
       ContaboStorage__ServiceUrl: "${CONTABO_S3_SERVICE_URL:-https://sin1.contabostorage.com}"
       ContaboStorage__BucketName: "${CONTABO_S3_BUCKET_NAME:-sightseeing-media}"
       ContaboStorage__PublicBaseUrl: "${CONTABO_S3_PUBLIC_BASE_URL:-https://sin1.contabostorage.com/contabo-tenant-id:sightseeing-media}"
       ContaboStorage__AccessKey: "${CONTABO_S3_ACCESS_KEY:-CONTABO_S3_ACCESS_KEY}"
       ContaboStorage__SecretKey: "${CONTABO_S3_SECRET_KEY:-CONTABO_S3_SECRET_KEY}"
       ContaboStorage__ForcePathStyle: "true"
-    ports:
-      - "8080:8080"
-
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: sightseeing-nginx
-    restart: unless-stopped
-    depends_on:
-      - api
-    ports:
-      - "80:80"
-    volumes:
-      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-
-volumes:
-  postgres_data:

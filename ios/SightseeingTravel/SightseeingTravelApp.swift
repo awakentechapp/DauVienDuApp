@@ -147,7 +147,7 @@ public struct SightseeingTravelApp: App {
         WindowGroup {
             Group {
                 if appState.isInitializing {
-                    ProgressView("Đang khởi tạo Sightseeing Travel AR...")
+                    ProgressView("Đang khởi tạo Dấu Viễn Du...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if appState.isAuthenticated, appState.currentUser != nil {
                     MainTabView()
@@ -786,7 +786,7 @@ public struct ProfileSettingsView: View {
                             .frame(width: 44, height: 44)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Sightseeing Travel")
+                            Text("Dấu Viễn Du")
                                 .font(.subheadline.weight(.bold))
                                 .foregroundStyle(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0))
                             Text(appState.selectedLanguage == .vi ? "Dấu viễn du · Phiên bản v1.1" : "Vintage Heritage Stamp · v1.1")
