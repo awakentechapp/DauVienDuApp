@@ -24,6 +24,8 @@ public sealed class ContaboStorageOptions
 /// </summary>
 public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisposable
 {
+    private static readonly TimeSpan ReadUrlLifetime = TimeSpan.FromMinutes(15);
+
     private readonly ContaboStorageOptions _options;
     private readonly IAmazonS3 _s3Client;
 
@@ -58,16 +60,33 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
             Key = normalizedKey,
             InputStream = fileStream,
             ContentType = contentType,
-            CannedACL = S3CannedACL.PublicRead,
             AutoCloseStream = false
         };
 
         await _s3Client.PutObjectAsync(putRequest, cancellationToken);
 
-        var publicUrl = $"{_options.PublicBaseUrl.TrimEnd('/')}/{normalizedKey}";
+        var storageUrl = $"{_options.PublicBaseUrl.TrimEnd('/')}/{normalizedKey}";
         var length = fileStream.CanSeek ? fileStream.Length : 0L;
 
-        return new StorageUploadResult(normalizedKey, publicUrl, length, contentType);
+        return new StorageUploadResult(normalizedKey, storageUrl, length, contentType);
+    }
+
+    public string CreateReadUrl(string objectKey)
+    {
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            throw new ArgumentException("An object key is required.", nameof(objectKey));
+        }
+
+        var request = new GetPreSignedUrlRequest
+        {
+            BucketName = _options.BucketName,
+            Key = objectKey.TrimStart('/'),
+            Verb = HttpVerb.GET,
+            Expires = DateTime.UtcNow.Add(ReadUrlLifetime)
+        };
+
+        return _s3Client.GetPreSignedURL(request);
     }
 
     public async Task DeleteObjectAsync(

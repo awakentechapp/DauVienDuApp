@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SightseeingTravel.Modules.CommunityMedia.Domain;
+using SightseeingTravel.SharedKernel.Abstractions;
 using SightseeingTravel.SharedKernel.Contracts;
 
 namespace SightseeingTravel.Modules.CommunityMedia.Infrastructure;
@@ -7,10 +8,14 @@ namespace SightseeingTravel.Modules.CommunityMedia.Infrastructure;
 public sealed class CommunityPhotoArQueryService : ICommunityPhotoArQueryService
 {
     private readonly CommunityMediaDbContext _dbContext;
+    private readonly IObjectStorageService _objectStorageService;
 
-    public CommunityPhotoArQueryService(CommunityMediaDbContext dbContext)
+    public CommunityPhotoArQueryService(
+        CommunityMediaDbContext dbContext,
+        IObjectStorageService objectStorageService)
     {
         _dbContext = dbContext;
+        _objectStorageService = objectStorageService;
     }
 
     public async Task<IReadOnlyList<ArHighlightedPhotoDto>> GetTopPhotosForArAsync(
@@ -50,7 +55,7 @@ public sealed class CommunityPhotoArQueryService : ICommunityPhotoArQueryService
         return topPhotos
             .Select(p => new ArHighlightedPhotoDto(
                 p.Id,
-                p.ImageUrl,
+                GetImageUrl(p),
                 p.Caption,
                 p.AuthorDisplayName,
                 p.LikeCount,
@@ -59,6 +64,11 @@ public sealed class CommunityPhotoArQueryService : ICommunityPhotoArQueryService
                 p.CreatedAt))
             .ToList();
     }
+
+    private string GetImageUrl(CommunityPhoto photo) =>
+        string.IsNullOrWhiteSpace(photo.ObjectKey)
+            ? photo.ImageUrl
+            : _objectStorageService.CreateReadUrl(photo.ObjectKey);
 
     public async Task<Dictionary<Guid, int>> GetPublishedPhotoCountsByPoiIdsAsync(
         IEnumerable<Guid> poiIds,

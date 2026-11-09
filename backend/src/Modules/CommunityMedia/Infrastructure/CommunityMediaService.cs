@@ -165,7 +165,7 @@ public sealed class CommunityMediaService : ICommunityMediaService
             userId: _currentUser.UserId,
             authorDisplayName: _currentUser.DisplayName,
             objectKey: uploadResult.ObjectKey,
-            imageUrl: uploadResult.PublicUrl,
+            imageUrl: uploadResult.StorageUrl,
             caption: command.Caption,
             capturedLatitude: command.CapturedLatitude,
             capturedLongitude: command.CapturedLongitude,
@@ -445,13 +445,18 @@ public sealed class CommunityMediaService : ICommunityMediaService
         return likedIds.ToHashSet();
     }
 
-    private static CommunityPhotoDto MapToCommunityPhotoDto(CommunityPhoto photo, bool isLikedByCurrentUser) =>
+    private string GetImageUrl(CommunityPhoto photo) =>
+        string.IsNullOrWhiteSpace(photo.ObjectKey)
+            ? photo.ImageUrl
+            : _objectStorageService.CreateReadUrl(photo.ObjectKey);
+
+    private CommunityPhotoDto MapToCommunityPhotoDto(CommunityPhoto photo, bool isLikedByCurrentUser) =>
         new(
             photo.Id,
             photo.PoiId,
             photo.UserId,
             photo.AuthorDisplayName,
-            photo.ImageUrl,
+            GetImageUrl(photo),
             photo.Caption,
             photo.CapturedLatitude,
             photo.CapturedLongitude,
@@ -461,13 +466,13 @@ public sealed class CommunityMediaService : ICommunityMediaService
             isLikedByCurrentUser,
             photo.CreatedAt);
 
-    private static AdminReportedPhotoDto MapToAdminReportedPhotoDto(CommunityPhoto photo) =>
+    private AdminReportedPhotoDto MapToAdminReportedPhotoDto(CommunityPhoto photo) =>
         new(
             photo.Id,
             photo.PoiId,
             photo.UserId,
             photo.AuthorDisplayName,
-            photo.ImageUrl,
+            GetImageUrl(photo),
             photo.Caption,
             photo.Status.ToString(),
             photo.LikeCount,

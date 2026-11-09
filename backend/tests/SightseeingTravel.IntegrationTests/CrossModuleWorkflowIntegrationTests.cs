@@ -47,6 +47,9 @@ public sealed class CrossModuleWorkflowIntegrationTests
                 contentType));
         }
 
+        public string CreateReadUrl(string objectKey) =>
+            $"https://sin1.contabostorage.com/sightseeing-media/{objectKey}";
+
         public Task DeleteObjectAsync(string objectKey, CancellationToken cancellationToken = default)
         {
             UploadedKeys.Remove(objectKey);
@@ -82,7 +85,7 @@ public sealed class CrossModuleWorkflowIntegrationTests
         await using var arDb = new ArExperienceDbContext(arOptions);
         await using var mediaDb = new CommunityMediaDbContext(mediaOptions);
 
-        var photoArQuery = new CommunityPhotoArQueryService(mediaDb);
+        var photoArQuery = new CommunityPhotoArQueryService(mediaDb, storage);
         var geofenceQuery = new AttractionGeofenceQueryService(attractionsDb);
 
         var attractionService = new AttractionService(

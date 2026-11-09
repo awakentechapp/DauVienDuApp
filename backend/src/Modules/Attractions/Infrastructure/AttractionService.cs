@@ -109,7 +109,7 @@ public sealed class AttractionService : IAttractionService
                     x.Poi.ActivationRadiusMeters,
                     x.DistanceMeters,
                     x.CanActivateAr,
-                    x.Poi.CoverImageUrl,
+                    GetCoverImageUrl(x.Poi),
                     photoCount);
             })
             .ToList();
@@ -184,7 +184,7 @@ public sealed class AttractionService : IAttractionService
             poi.ActivationRadiusMeters,
             distanceMeters,
             canActivateAr,
-            poi.CoverImageUrl,
+            GetCoverImageUrl(poi),
             photoCount,
             poi.UpdatedAt);
 
@@ -413,7 +413,7 @@ public sealed class AttractionService : IAttractionService
             objectKey,
             cancellationToken);
 
-        poi.SetCoverImage(uploadResult.PublicUrl, uploadResult.ObjectKey, _dateTimeProvider.UtcNow);
+        poi.SetCoverImage(uploadResult.StorageUrl, uploadResult.ObjectKey, _dateTimeProvider.UtcNow);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(previousObjectKey) &&
@@ -604,7 +604,12 @@ public sealed class AttractionService : IAttractionService
             .Select(g => g.Last());
     }
 
-    private static AdminPoiDto MapToAdminDto(PointOfInterest poi)
+    private string? GetCoverImageUrl(PointOfInterest poi) =>
+        string.IsNullOrWhiteSpace(poi.CoverObjectKey)
+            ? poi.CoverImageUrl
+            : _objectStorageService.CreateReadUrl(poi.CoverObjectKey);
+
+    private AdminPoiDto MapToAdminDto(PointOfInterest poi)
     {
         var localizations = poi.Localizations
             .OrderBy(x => x.LanguageCode)
@@ -624,7 +629,7 @@ public sealed class AttractionService : IAttractionService
             poi.ActivationRadiusMeters,
             poi.Status.ToString(),
             poi.RejectionReason,
-            poi.CoverImageUrl,
+            GetCoverImageUrl(poi),
             poi.CreatedBy,
             poi.ApprovedBy,
             poi.ApprovedAt,
