@@ -10,7 +10,7 @@
 | :--- | :--- | :--- |
 | **Backend API** | **ASP.NET Core 8.0 Web API** | Kiến trúc **Modular Monolith + Clean Architecture + API-First** (`/api/v1`), JWT Authentication tự chủ + Refresh Token Rotation, RBAC 3 cấp (`Tourist`, `Admin`, `SuperAdmin`). |
 | **Database** | **PostgreSQL 16** | Phân tách 4 Schemas độc lập theo Module: `identity`, `attractions`, `ar`, `media`. |
-| **Object Storage** | **Contabo Object Storage (S3-Compatible)** | Tích hợp qua `AWSSDK.S3` (`ForcePathStyle = true`), lưu trữ ảnh bìa địa điểm và ảnh cộng đồng do du khách chụp tại điểm đến. |
+| **Object Storage** | **Contabo Object Storage (S3-Compatible)** | Tích hợp qua `AWSSDK.S3` (`ForcePathStyle = true`), lưu ảnh bìa địa điểm và ảnh cộng đồng dưới prefix `dauviendu_cloud/` trong bucket đã cấu hình. |
 | **iOS Native** | **SwiftUI (iOS 17+)** | **Apple MapKit** (`Map`, `UserAnnotation`, `Annotation`) + **ARKit / SceneKit (`ARSCNView`)** hiển thị thẻ văn hóa AR & Top 10 khung ảnh cộng đồng trong không gian 3D. |
 | **Android Native** | **Kotlin + Jetpack Compose (Material 3)** | **MapLibre Native SDK** với **OpenFreeMap Bright** (`https://tiles.openfreemap.org/styles/bright`) & **OpenStreetMap** + **CameraX & ARCore/Sensor 3D Projection**. |
 
@@ -55,7 +55,7 @@ DauVienDuApp/
    ```bash
    cp .env.example .env
    ```
-2. Cấu hình `.env` cho database/user PostgreSQL `awkdvd` đã tạo trong FlashPanel, gồm mật khẩu database, `JWT_SIGNING_KEY`, email SuperAdmin khởi tạo và mật khẩu bootstrap. Tạo `JWT_SIGNING_KEY` ngẫu nhiên tối thiểu 32 byte, ví dụ bằng `openssl rand -hex 32`. Điền thông tin **Contabo Object Storage** (`CONTABO_S3_SERVICE_URL`, `CONTABO_S3_BUCKET_NAME`, `CONTABO_S3_ACCESS_KEY`, `CONTABO_S3_SECRET_KEY`) nếu bật upload ảnh.
+2. Cấu hình `.env` cho database/user PostgreSQL `awkdvd` đã tạo trong FlashPanel, gồm mật khẩu database, `JWT_SIGNING_KEY`, email SuperAdmin khởi tạo và mật khẩu bootstrap. Tạo `JWT_SIGNING_KEY` ngẫu nhiên tối thiểu 32 byte, ví dụ bằng `openssl rand -hex 32`. Điền thông tin **Contabo Object Storage** (`CONTABO_S3_SERVICE_URL`, `CONTABO_S3_BUCKET_NAME`, `CONTABO_S3_PUBLIC_BASE_URL`, `CONTABO_S3_KEY_PREFIX`, `CONTABO_S3_ACCESS_KEY`, `CONTABO_S3_SECRET_KEY`) nếu bật upload ảnh. Mặc định `CONTABO_S3_KEY_PREFIX=dauviendu_cloud`; mọi ảnh được upload qua app sẽ nằm dưới prefix này trong bucket.
    Bucket không cần bật Public Access: API upload object không gắn ACL công khai và trả URL GET ký số có hiệu lực 15 phút. URL ký số là bearer link trong thời gian này; chỉ người có URL mới đọc được object.
 3. Khởi chạy bằng Docker Compose:
    ```bash

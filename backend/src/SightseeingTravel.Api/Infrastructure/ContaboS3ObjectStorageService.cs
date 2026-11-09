@@ -11,8 +11,9 @@ public sealed class ContaboStorageOptions
     public const string SectionName = "ContaboStorage";
 
     public string ServiceUrl { get; set; } = "https://sin1.contabostorage.com";
-    public string BucketName { get; set; } = "sightseeing-media";
-    public string PublicBaseUrl { get; set; } = "https://sin1.contabostorage.com/sightseeing-media";
+    public string BucketName { get; set; } = "awakencloud";
+    public string PublicBaseUrl { get; set; } = "https://sin1.contabostorage.com/3e270ee749cc4c6caa56fcceac2c4202:awakencloud";
+    public string KeyPrefix { get; set; } = "dauviendu_cloud";
     public string AccessKey { get; set; } = string.Empty;
     public string SecretKey { get; set; } = string.Empty;
     public bool ForcePathStyle { get; set; } = true;
@@ -50,7 +51,7 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
         string objectKey,
         CancellationToken cancellationToken = default)
     {
-        var normalizedKey = objectKey.TrimStart('/');
+        var normalizedKey = AddKeyPrefix(objectKey);
         if (fileStream.CanSeek)
             fileStream.Position = 0;
 
@@ -101,6 +102,21 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
         };
 
         await _s3Client.DeleteObjectAsync(deleteRequest, cancellationToken);
+    }
+
+    private string AddKeyPrefix(string objectKey)
+    {
+        var normalizedKey = objectKey.TrimStart('/');
+        var prefix = _options.KeyPrefix.Trim('/');
+
+        if (string.IsNullOrWhiteSpace(prefix) ||
+            normalizedKey.Equals(prefix, StringComparison.Ordinal) ||
+            normalizedKey.StartsWith($"{prefix}/", StringComparison.Ordinal))
+        {
+            return normalizedKey;
+        }
+
+        return $"{prefix}/{normalizedKey}";
     }
 
     public void Dispose()
