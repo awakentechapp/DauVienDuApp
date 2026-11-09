@@ -6,6 +6,7 @@ WORKDIR /src
 
 COPY ["SightseeingTravel.sln", "./"]
 COPY ["src/SightseeingTravel.SharedKernel/SightseeingTravel.SharedKernel.csproj", "src/SightseeingTravel.SharedKernel/"]
+COPY ["src/SightseeingTravel.Persistence/SightseeingTravel.Persistence.csproj", "src/SightseeingTravel.Persistence/"]
 COPY ["src/Modules/Identity/SightseeingTravel.Modules.Identity.csproj", "src/Modules/Identity/"]
 COPY ["src/Modules/Attractions/SightseeingTravel.Modules.Attractions.csproj", "src/Modules/Attractions/"]
 COPY ["src/Modules/ArExperience/SightseeingTravel.Modules.ArExperience.csproj", "src/Modules/ArExperience/"]
