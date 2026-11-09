@@ -244,14 +244,11 @@ public struct HomePortalView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     // Hero Banner
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text(
-                                appState.selectedLanguage == .vi
-                                    ? "DU LỊCH VĂN HÓA & THỰC TẾ TĂNG CƯỜNG AR"
-                                    : "CULTURAL SIGHTSEEING & 360° AR"
-                            )
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.teal)
+                        HStack(alignment: .center) {
+                            Image("LogoHorizontalLight")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 36)
 
                             Spacer()
 
@@ -263,8 +260,8 @@ public struct HomePortalView: View {
                                     .font(.caption.weight(.bold))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 5)
-                                    .background(Color.teal.opacity(0.18))
-                                    .foregroundStyle(.teal)
+                                    .background(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0).opacity(0.12))
+                                    .foregroundStyle(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0))
                                     .clipShape(Capsule())
                             }
                         }
@@ -670,9 +667,11 @@ public struct ProfileSettingsView: View {
                 if let user = appState.currentUser {
                     Section(appState.selectedLanguage == .vi ? "Thông tin tài khoản" : "Account Information") {
                         HStack(spacing: 14) {
-                            Image(systemName: "person.crop.circle.badge.checkmark")
-                                .font(.system(size: 44))
-                                .foregroundStyle(.teal)
+                            Image("StampBadge")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 52, height: 52)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
 
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(user.displayName)
@@ -777,6 +776,25 @@ public struct ProfileSettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.teal)
                     }
+                }
+
+                Section(appState.selectedLanguage == .vi ? "Về ứng dụng" : "About App") {
+                    HStack(spacing: 14) {
+                        Image("StampBadge")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 44, height: 44)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sightseeing Travel")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0))
+                            Text(appState.selectedLanguage == .vi ? "Dấu viễn du · Phiên bản v1.1" : "Vintage Heritage Stamp · v1.1")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
 
                 Section {

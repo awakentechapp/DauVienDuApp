@@ -14,27 +14,13 @@ public struct AuthScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Header Branding
+                    // Header Branding - Dấu viễn du Official Logo
                     VStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.teal, .blue],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 88, height: 88)
-                                .shadow(color: .teal.opacity(0.35), radius: 12, y: 6)
-
-                            Image(systemName: "arkit")
-                                .font(.system(size: 42, weight: .semibold))
-                                .foregroundStyle(.white)
-                        }
-
-                        Text("Sightseeing Travel AR")
-                            .font(.title.weight(.bold))
+                        Image("LogoVerticalLight")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 200, maxHeight: 160)
+                            .shadow(color: Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0).opacity(0.15), radius: 10, y: 4)
 
                         Text(
                             appState.selectedLanguage == .vi
@@ -46,7 +32,7 @@ public struct AuthScreen: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                     }
-                    .padding(.top, 20)
+                    .padding(.top, 16)
 
                     // Language Switcher
                     Picker("Language", selection: $appState.selectedLanguage) {

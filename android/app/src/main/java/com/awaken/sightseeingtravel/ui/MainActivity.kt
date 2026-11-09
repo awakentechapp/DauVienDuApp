@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -29,12 +30,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.awaken.sightseeingtravel.R
 import com.awaken.sightseeingtravel.core.model.*
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
@@ -412,25 +415,13 @@ private fun HomeTabScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isEn) "SIGHTSEEING TRAVEL • 50KM RADIUS" else "DU LỊCH VĂN HÓA & ẨM THỰC • BÁN KÍNH 50KM",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (uiState.currentUser != null) {
-                                if (isEn) "Hello, ${uiState.currentUser.displayName}" else "Xin chào, ${uiState.currentUser.displayName}"
-                            } else {
-                                if (isEn) "Discover Cultural & Culinary Stories" else "Khám Phá Văn Hóa & Ăn Uống"
-                            },
-                            color = Color.White,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
+                    Image(
+                        painter = painterResource(id = R.drawable.logo_ngang_kem_dao),
+                        contentDescription = "Sightseeing Travel - Dấu viễn du",
+                        modifier = Modifier
+                            .height(38.dp)
+                            .wrapContentWidth(Alignment.Start)
+                    )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilledTonalButton(
@@ -459,6 +450,18 @@ private fun HomeTabScreen(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = if (uiState.currentUser != null) {
+                        if (isEn) "Hello, ${uiState.currentUser.displayName}" else "Xin chào, ${uiState.currentUser.displayName}"
+                    } else {
+                        if (isEn) "Discover Cultural & Culinary Stories • 50km Radius" else "Khám Phá Văn Hóa & Ẩm Thực • Bán Kính 50km"
+                    },
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -1424,13 +1427,12 @@ private fun InfoAndProfileTabScreen(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .size(54.dp)
-                            .background(Color(0xFFE0F2FE), CircleShape)
+                            .background(Color(0xFFF7EDD7), RoundedCornerShape(12.dp))
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color(0xFF0284C7),
-                            modifier = Modifier.size(30.dp)
+                        Image(
+                            painter = painterResource(id = R.drawable.tem_do_gach),
+                            contentDescription = "Dấu viễn du",
+                            modifier = Modifier.size(38.dp)
                         )
                     }
 
@@ -1626,6 +1628,38 @@ private fun InfoAndProfileTabScreen(
                     fontSize = 13.sp,
                     color = Color(0xFF334155)
                 )
+            }
+        }
+
+        // 5. Official App Brand Card
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF7EDD7)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.tem_do_gach),
+                    contentDescription = "Sightseeing Travel Stamp",
+                    modifier = Modifier.size(46.dp)
+                )
+                Column {
+                    Text(
+                        text = "Sightseeing Travel",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color(0xFF622821)
+                    )
+                    Text(
+                        text = if (isEn) "Vintage Heritage Stamp Edition • v1.1" else "Dấu viễn du • Phiên bản v1.1",
+                        fontSize = 12.5.sp,
+                        color = Color(0xFF622821).copy(alpha = 0.8f)
+                    )
+                }
             }
         }
     }
@@ -1911,16 +1945,29 @@ private fun AuthAndRoleDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                text = if (currentUser != null) {
-                    if (isEn) "Account (${currentUser.role})" else "Tài khoản (${currentUser.role})"
-                } else if (isRegisterMode) {
-                    if (isEn) "Register Tourist Account" else "Đăng ký Du khách"
-                } else {
-                    if (isEn) "Sign In (Sightseeing Travel)" else "Đăng Nhập Hệ Thống"
-                },
-                fontWeight = FontWeight.Bold
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.logo_doc_do_gach),
+                    contentDescription = "Sightseeing Travel Logo",
+                    modifier = Modifier
+                        .height(84.dp)
+                        .padding(bottom = 6.dp)
+                )
+                Text(
+                    text = if (currentUser != null) {
+                        if (isEn) "Account (${currentUser.role})" else "Tài khoản (${currentUser.role})"
+                    } else if (isRegisterMode) {
+                        if (isEn) "Register Tourist Account" else "Đăng ký Du khách"
+                    } else {
+                        if (isEn) "Sign In (Sightseeing Travel)" else "Đăng Nhập Hệ Thống"
+                    },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+            }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

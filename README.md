@@ -1,6 +1,6 @@
-# SIGHTSEEING TRAVEL — Cultural Discovery, GPS Map, AR Camera & Community Photo Platform
+# SIGHTSEEING TRAVEL (v1.1) — Cultural Discovery, GPS Map, AR Camera & Community Photo Platform
 
-**SIGHTSEEING TRAVEL** là nền tảng du lịch văn hóa đa ngôn ngữ (`vi` / `en`) dành cho du khách quốc tế và nội địa, kết hợp định vị bản đồ GPS thời gian thực, công nghệ Thực tế tăng cường (AR Camera) hiển thị câu chuyện văn hóa và những bức ảnh đẹp nhất của cộng đồng ngay tại điểm đến, cùng quy trình quản trị và phê duyệt 3 cấp (`Tourist`, `Admin`, `SuperAdmin`).
+**SIGHTSEEING TRAVEL (Dấu viễn du — Phiên bản v1.1)** là nền tảng du lịch văn hóa đa ngôn ngữ (`vi` / `en`) dành cho du khách quốc tế và nội địa, kết hợp định vị bản đồ GPS thời gian thực, công nghệ Thực tế tăng cường (AR Camera) hiển thị câu chuyện văn hóa và những bức ảnh đẹp nhất của cộng đồng ngay tại điểm đến, cùng quy trình quản trị và phê duyệt 3 cấp (`Tourist`, `Admin`, `SuperAdmin`).
 
 ---
 
