@@ -189,11 +189,11 @@ public struct AuthScreen: View {
 
     private var isFormValid: Bool {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        let validEmail = trimmedEmail.contains("@") && trimmedEmail.contains(".")
+        let validAccountId = trimmedEmail.count >= 2
         let validPassword = password.count >= 6
         if isRegisterMode {
-            return validEmail && validPassword && !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return validAccountId && validPassword && !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        return validEmail && validPassword
+        return validAccountId && validPassword
     }
 }

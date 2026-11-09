@@ -18,12 +18,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,8 +51,8 @@ private enum class AppDestination {
 /**
  * 4 Main Bottom Navigation Tabs:
  * 1. Trang chủ (HOME)
- * 2. Địa điểm (PLACES)
- * 3. Khám phá (EXPLORE - current GPS Map + AR experience)
+ * 2. Địa điểm (PLACES - includes Văn hóa & Ăn uống within 50km radius)
+ * 3. Khám phá (EXPLORE - OpenFreeMap/Bright GPS Map + AR experience)
  * 4. Thông tin (INFO)
  */
 private enum class MainBottomTab(
@@ -67,10 +68,8 @@ private enum class MainBottomTab(
 
 /**
  * Main Entry Activity for the Sightseeing Travel AR Android Application.
- * - 4 Bottom Tabs: Trang chủ, Địa điểm, Khám phá (MapLibre + OpenFreeMap/OSM + AR), Thông tin
- * - Multilingual Cultural Story & Community Photo Gallery Sheet (`vi` / `en`)
- * - Geofence-Unlocked Spatial AR Camera (`CameraX` + `ARCore`/Sensor 3D Projection)
- * - Role-based JWT Authentication (`Tourist`, `Admin`, `SuperAdmin`) & Governance Console
+ * - 4 Bottom Tabs: Trang chủ, Địa điểm (Văn hóa & Ăn uống trong bán kính 50km), Khám phá (OpenFreeMap/Bright + AR), Thông tin
+ * - 3 Dedicated Role Accounts: `testapp` (Tourist), `testadmin` (Admin), `sa` (SuperAdmin)
  */
 class MainActivity : ComponentActivity() {
 
@@ -103,6 +102,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun formatDistanceLabel(meters: Double): String {
+    return if (meters < 1000.0) {
+        "${meters.toInt()}m"
+    } else {
+        "%.1fkm".format(meters / 1000.0)
+    }
+}
+
+private fun isFoodCategory(category: String): Boolean {
+    return category.contains("Ăn uống", ignoreCase = true) ||
+        category.contains("Food", ignoreCase = true) ||
+        category.contains("Ẩm thực", ignoreCase = true)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
@@ -111,6 +124,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
 
     var currentDestination by remember { mutableStateOf(AppDestination.MAIN_TABS) }
     var selectedTab by remember { mutableStateOf(MainBottomTab.EXPLORE) }
+    var initialPlacesCategory by remember { mutableStateOf("ALL") }
     var recenterTrigger by remember { mutableIntStateOf(0) }
     var showAuthModal by remember { mutableStateOf(false) }
 
@@ -253,7 +267,8 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                         viewModel.selectPoiPin(poiId, spatialPose.latitude, spatialPose.longitude)
                                     }
                                 },
-                                onNavigateToPlacesTab = {
+                                onNavigateToPlacesTab = { categoryFilter ->
+                                    initialPlacesCategory = categoryFilter
                                     selectedTab = MainBottomTab.PLACES
                                 },
                                 onSimulateAndOpenAr = { pin ->
@@ -270,6 +285,8 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                             PlacesDirectoryTabScreen(
                                 uiState = uiState,
                                 spatialPose = spatialPose,
+                                initialCategory = initialPlacesCategory,
+                                onCategoryChanged = { initialPlacesCategory = it },
                                 onViewPoiOnExploreMap = { pin ->
                                     viewModel.selectPoiPin(pin.id, spatialPose.latitude, spatialPose.longitude)
                                     selectedTab = MainBottomTab.EXPLORE
@@ -315,6 +332,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                 spatialPose = spatialPose,
                                 onSetLanguage = { lang -> viewModel.setLanguage(lang) },
                                 onOpenAccountModal = { showAuthModal = true },
+                                onQuickLogin = { id, pass -> viewModel.login(id, pass) },
                                 onOpenAdminConsole = {
                                     viewModel.loadAdminConsoleData()
                                     currentDestination = AppDestination.ADMIN_CONSOLE
@@ -328,13 +346,14 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
         }
     }
 
-    // Auth & Role Switcher Modal (`Tourist`, `Admin`, `SuperAdmin`) - Mandatory login gate per BR-01
+    // Auth & Role Switcher Modal (`Tourist: testapp`, `Admin: testadmin`, `SuperAdmin: sa`)
     if (showAuthModal || uiState.currentUser == null) {
         AuthAndRoleDialog(
             currentUser = uiState.currentUser,
             selectedLanguage = uiState.selectedLanguage,
-            onLogin = { email, password ->
-                viewModel.login(email, password) { showAuthModal = false }
+            errorMessage = uiState.errorMessage,
+            onLogin = { accountId, password ->
+                viewModel.login(accountId, password) { showAuthModal = false }
             },
             onRegister = { email, password, name ->
                 viewModel.register(email, password, name, uiState.selectedLanguage) {
@@ -362,19 +381,12 @@ private fun HomeTabScreen(
     onOpenAccountModal: () -> Unit,
     onOpenAdminConsole: () -> Unit,
     onNavigateToExploreMap: (String?) -> Unit,
-    onNavigateToPlacesTab: () -> Unit,
+    onNavigateToPlacesTab: (String) -> Unit,
     onSimulateAndOpenAr: (PoiPinSummaryDto) -> Unit
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
-    val unlockedCount = uiState.nearbyPois.count { pin ->
-        val dist = LocationAndOrientationTracker.calculateDistanceMeters(
-            spatialPose.latitude,
-            spatialPose.longitude,
-            pin.latitude,
-            pin.longitude
-        )
-        pin.canUnlockAr(dist)
-    }
+    val culturalPois = uiState.nearbyPois.filterNot { isFoodCategory(it.category) }
+    val foodPois = uiState.nearbyPois.filter { isFoodCategory(it.category) }
 
     Column(
         modifier = Modifier
@@ -402,7 +414,7 @@ private fun HomeTabScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (isEn) "SIGHTSEEING TRAVEL AR" else "DU LỊCH VĂN HÓA & THỰC TẾ ẢO AR",
+                            text = if (isEn) "SIGHTSEEING TRAVEL • 50KM RADIUS" else "DU LỊCH VĂN HÓA & ẨM THỰC • BÁN KÍNH 50KM",
                             color = Color(0xFF38BDF8),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold
@@ -412,10 +424,10 @@ private fun HomeTabScreen(
                             text = if (uiState.currentUser != null) {
                                 if (isEn) "Hello, ${uiState.currentUser.displayName}" else "Xin chào, ${uiState.currentUser.displayName}"
                             } else {
-                                if (isEn) "Discover Cultural Stories" else "Khám Phá Di Sản Việt Nam"
+                                if (isEn) "Discover Cultural & Culinary Stories" else "Khám Phá Văn Hóa & Ăn Uống"
                             },
                             color = Color.White,
-                            fontSize = 21.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                     }
@@ -452,9 +464,9 @@ private fun HomeTabScreen(
 
                 Text(
                     text = if (isEn) {
-                        "Walk to historical landmarks on the GPS map, open your 360° AR Camera to view floating cultural stories and community photos."
+                        "Displaying all cultural landmarks and Food & Dining ('Ăn uống') spots within 50km of your current GPS location on OpenFreeMap/Bright."
                     } else {
-                        "Di chuyển đến các địa danh lịch sử trên bản đồ GPS, mở Camera AR 360° để xem câu chuyện văn hóa và những bức ảnh đẹp từ cộng đồng."
+                        "Hiển thị toàn bộ địa danh văn hóa và điểm Ăn uống trong bán kính 50km quanh vị trí đang ở của bạn trên bản đồ OpenFreeMap/Bright."
                     },
                     color = Color(0xFFE0F2FE),
                     fontSize = 13.sp
@@ -471,24 +483,24 @@ private fun HomeTabScreen(
                         Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isEn) "Open Explore Map" else "Mở Bản Đồ Khám Phá",
+                            text = if (isEn) "Explore 50km Map" else "Bản Đồ Khám Phá",
                             fontWeight = FontWeight.Bold
                         )
                     }
 
                     OutlinedButton(
-                        onClick = onNavigateToPlacesTab,
+                        onClick = { onNavigateToPlacesTab("FOOD") },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                     ) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Restaurant, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isEn) "All Places" else "Xem Địa Điểm")
+                        Text(if (isEn) "Food & Dining" else "Điểm Ăn Uống")
                     }
                 }
             }
         }
 
-        // Quick Telemetry & AR Status Cards
+        // Quick Telemetry & 50km Zone Cards
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -496,19 +508,19 @@ private fun HomeTabScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             HomeStatCard(
-                title = if (isEn) "Nearby POIs" else "Địa điểm gần bạn",
+                title = if (isEn) "Within 50km" else "Trong vùng 50km",
                 value = "${uiState.nearbyPois.size}",
-                subtitle = if (isEn) "Published pins" else "Điểm đã duyệt",
+                subtitle = if (isEn) "Total places" else "Tổng địa điểm",
                 icon = Icons.Default.Place,
                 accentColor = Color(0xFF0284C7),
                 modifier = Modifier.weight(1f)
             )
             HomeStatCard(
-                title = if (isEn) "AR Unlocked" else "Sẵn sàng mở AR",
-                value = "$unlockedCount",
-                subtitle = if (isEn) "Within radius" else "Trong vùng GPS",
-                icon = Icons.Default.ViewInAr,
-                accentColor = Color(0xFF16A34A),
+                title = if (isEn) "Food & Dining" else "Điểm Ăn uống",
+                value = "${foodPois.size}",
+                subtitle = if (isEn) "Within 50km" else "Ẩm thực 50km",
+                icon = Icons.Default.Restaurant,
+                accentColor = Color(0xFFE11D48),
                 modifier = Modifier.weight(1f)
             )
             HomeStatCard(
@@ -539,9 +551,9 @@ private fun HomeTabScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = if (uiState.currentUser.isSuperAdmin) {
-                                if (isEn) "SuperAdmin Governance Console" else "Bảng Chủ Quản (SuperAdmin) - Duyệt Địa Điểm & Ảnh"
+                                if (isEn) "SuperAdmin (sa) Governance Console" else "Bảng Chủ Quản (sa) - Duyệt Địa Điểm & Kiểm Duyệt Ảnh"
                             } else {
-                                if (isEn) "Admin POI & Moderation Console" else "Bảng Quản Trị Viên (Admin) - Tạo Pin & Kiểm Duyệt"
+                                if (isEn) "Admin (testadmin) POI & Moderation Console" else "Bảng Quản Trị Viên (testadmin) - Tạo Pin & Kiểm Duyệt"
                             },
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.sp,
@@ -554,7 +566,7 @@ private fun HomeTabScreen(
                         )
                     }
                     Icon(
-                        imageVector = Icons.Default.ArrowForwardIos,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
                         contentDescription = null,
                         tint = Color(0xFF92400E),
                         modifier = Modifier.size(16.dp)
@@ -564,21 +576,21 @@ private fun HomeTabScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // Section: Featured Sightseeing Destinations
+        // Section 1: Food & Dining ("Ăn uống") within 50km
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (isEn) "Featured Cultural Destinations" else "Địa Điểm Văn Hóa Nổi Bật",
+                text = if (isEn) "Food & Dining Within 50km (Ăn uống)" else "Địa Điểm Ăn Uống Quanh Bạn (≤ 50km)",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 17.sp,
                 color = Color(0xFF0F172A)
             )
-            TextButton(onClick = onNavigateToPlacesTab) {
+            TextButton(onClick = { onNavigateToPlacesTab("FOOD") }) {
                 Text(if (isEn) "See All" else "Xem tất cả")
             }
         }
@@ -587,143 +599,161 @@ private fun HomeTabScreen(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(uiState.nearbyPois, key = { it.id }) { pin ->
-                val dist = LocationAndOrientationTracker.calculateDistanceMeters(
-                    spatialPose.latitude,
-                    spatialPose.longitude,
-                    pin.latitude,
-                    pin.longitude
+            items(foodPois, key = { it.id }) { pin ->
+                PoiFeaturedHorizontalCard(
+                    pin = pin,
+                    spatialPose = spatialPose,
+                    isEn = isEn,
+                    onViewPin = { onNavigateToExploreMap(pin.id) },
+                    onOpenAr = { onSimulateAndOpenAr(pin) }
                 )
-                val isUnlocked = pin.canUnlockAr(dist)
-
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                    modifier = Modifier.width(285.dp)
-                ) {
-                    Column {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(145.dp)
-                        ) {
-                            AsyncImage(
-                                model = pin.coverImageUrl,
-                                contentDescription = pin.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            Surface(
-                                color = if (isUnlocked) Color(0xFF16A34A) else Color(0xFF0F172A).copy(alpha = 0.8f),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(10.dp)
-                            ) {
-                                Text(
-                                    text = if (isUnlocked) {
-                                        if (isEn) "AR Ready (${dist.toInt()}m)" else "Đã mở AR (${dist.toInt()}m)"
-                                    } else {
-                                        "${dist.toInt()}m"
-                                    },
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Text(
-                                text = pin.category.uppercase(),
-                                color = Color(0xFF0284C7),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = pin.title,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 16.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = Color(0xFF0F172A)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = pin.shortSummary,
-                                fontSize = 12.5.sp,
-                                color = Color(0xFF475569),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    onClick = { onNavigateToExploreMap(pin.id) },
-                                    modifier = Modifier.weight(1f),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(if (isEn) "View Pin" else "Bản đồ", fontSize = 12.sp)
-                                }
-                                Button(
-                                    onClick = { onSimulateAndOpenAr(pin) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                                    modifier = Modifier.weight(1f),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(if (isEn) "Open AR" else "Mở AR 360°", fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Section: How Sightseeing Travel AR Works
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        // Section 2: Cultural & Heritage Landmarks within 50km
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = if (isEn) "How to Experience 360° Cultural AR" else "Trải Nghiệm Du Lịch Thực Tế Tăng Cường (AR)",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 15.5.sp,
-                    color = Color(0xFF0F172A)
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = if (isEn) {
-                        "1. Select a destination in the 'Places' or 'Explore' tab.\n" +
-                            "2. Walk within the POI's GPS radius (or tap 'Simulate GPS Here' for quick testing).\n" +
-                            "3. Open the 360° AR Camera to read cultural stories floating in real space and capture photos to share with fellow travelers."
-                    } else {
-                        "1. Chọn một địa danh trong tab 'Địa điểm' hoặc 'Khám phá'.\n" +
-                            "2. Di chuyển vào bán kính GPS của điểm đến (hoặc bấm 'Giả lập đến Pin' để kiểm thử nhanh).\n" +
-                            "3. Mở Camera AR 360° để xem các thẻ câu chuyện văn hóa lơ lửng trong không gian thực và chụp ảnh chia sẻ lên cộng đồng."
-                    },
-                    fontSize = 13.sp,
-                    color = Color(0xFF334155),
-                    lineHeight = 20.sp
+            Text(
+                text = if (isEn) "Cultural Heritage Within 50km" else "Địa Danh Văn Hóa & Lịch Sử (≤ 50km)",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 17.sp,
+                color = Color(0xFF0F172A)
+            )
+            TextButton(onClick = { onNavigateToPlacesTab("ALL") }) {
+                Text(if (isEn) "See All" else "Xem tất cả")
+            }
+        }
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            items(culturalPois, key = { it.id }) { pin ->
+                PoiFeaturedHorizontalCard(
+                    pin = pin,
+                    spatialPose = spatialPose,
+                    isEn = isEn,
+                    onViewPin = { onNavigateToExploreMap(pin.id) },
+                    onOpenAr = { onSimulateAndOpenAr(pin) }
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun PoiFeaturedHorizontalCard(
+    pin: PoiPinSummaryDto,
+    spatialPose: DeviceSpatialPose,
+    isEn: Boolean,
+    onViewPin: () -> Unit,
+    onOpenAr: () -> Unit
+) {
+    val dist = LocationAndOrientationTracker.calculateDistanceMeters(
+        spatialPose.latitude,
+        spatialPose.longitude,
+        pin.latitude,
+        pin.longitude
+    )
+    val isUnlocked = pin.canUnlockAr(dist)
+    val isFood = isFoodCategory(pin.category)
+
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        modifier = Modifier.width(285.dp)
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+            ) {
+                AsyncImage(
+                    model = pin.coverImageUrl,
+                    contentDescription = pin.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Surface(
+                    color = if (isUnlocked) Color(0xFF16A34A) else if (isFood) Color(0xFFE11D48) else Color(0xFF0F172A).copy(alpha = 0.82f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = if (isUnlocked) {
+                            if (isEn) "AR Ready (${formatDistanceLabel(dist)})" else "Mở AR (${formatDistanceLabel(dist)})"
+                        } else {
+                            "${formatDistanceLabel(dist)} • ≤50km"
+                        },
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = pin.category.uppercase(),
+                    color = if (isFood) Color(0xFFE11D48) else Color(0xFF0284C7),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = pin.title,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = pin.shortSummary,
+                    fontSize = 12.5.sp,
+                    color = Color(0xFF475569),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = onViewPin,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (isEn) "Map" else "Bản đồ", fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = onOpenAr,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (isEn) "Open AR" else "Mở AR 360°", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -776,13 +806,15 @@ private fun HomeStatCard(
 }
 
 // ============================================================================
-// TAB 2: ĐỊA ĐIỂM (PLACES DIRECTORY TAB SCREEN)
+// TAB 2: ĐỊA ĐIỂM (PLACES DIRECTORY TAB - VĂN HÓA & ĂN UỐNG TRONG BÁN KÍNH 50KM)
 // ============================================================================
 
 @Composable
 private fun PlacesDirectoryTabScreen(
     uiState: SightseeingUiState,
     spatialPose: DeviceSpatialPose,
+    initialCategory: String,
+    onCategoryChanged: (String) -> Unit,
     onViewPoiOnExploreMap: (PoiPinSummaryDto) -> Unit,
     onSimulateGpsNearPin: (PoiPinSummaryDto) -> Unit,
     onOpenArForPin: (PoiPinSummaryDto) -> Unit,
@@ -790,26 +822,33 @@ private fun PlacesDirectoryTabScreen(
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
     var searchQuery by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("ALL") }
+    var selectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
 
-    val categories = remember(uiState.nearbyPois) {
-        listOf("ALL", "AR_READY") + uiState.nearbyPois.map { it.category }.distinct()
-    }
+    val filterKeys = listOf("ALL", "FOOD", "CULTURE", "AR_READY")
 
-    val filteredPois = uiState.nearbyPois.filter { pin ->
-        val matchesSearch = searchQuery.isBlank() ||
-            pin.title.contains(searchQuery, ignoreCase = true) ||
-            pin.shortSummary.contains(searchQuery, ignoreCase = true) ||
-            pin.category.contains(searchQuery, ignoreCase = true)
-
-        val liveDist = LocationAndOrientationTracker.calculateDistanceMeters(
+    // Filter all POIs strictly within 50km (50,000 meters) of current location
+    val poisWithin50Km = uiState.nearbyPois.map { pin ->
+        val dist = LocationAndOrientationTracker.calculateDistanceMeters(
             spatialPose.latitude,
             spatialPose.longitude,
             pin.latitude,
             pin.longitude
         )
+        pin.copy(distanceMeters = dist)
+    }.filter { (it.distanceMeters ?: 0.0) <= SightseeingAppViewModel.SEARCH_RADIUS_METERS }
+        .sortedBy { it.distanceMeters ?: Double.MAX_VALUE }
+
+    val filteredPois = poisWithin50Km.filter { pin ->
+        val matchesSearch = searchQuery.isBlank() ||
+            pin.title.contains(searchQuery, ignoreCase = true) ||
+            pin.shortSummary.contains(searchQuery, ignoreCase = true) ||
+            pin.category.contains(searchQuery, ignoreCase = true)
+
+        val liveDist = pin.distanceMeters ?: 0.0
         val matchesCategory = when (selectedCategory) {
             "ALL" -> true
+            "FOOD" -> isFoodCategory(pin.category)
+            "CULTURE" -> !isFoodCategory(pin.category)
             "AR_READY" -> pin.canUnlockAr(liveDist)
             else -> pin.category.equals(selectedCategory, ignoreCase = true)
         }
@@ -834,21 +873,22 @@ private fun PlacesDirectoryTabScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (isEn) "Cultural Places Directory" else "Danh Sách Địa Điểm Văn Hóa",
+                            text = if (isEn) "Places & Dining (Within 50km)" else "Địa Điểm & Ăn Uống (Bán Kính 50km)",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 20.sp,
+                            fontSize = 19.sp,
                             color = Color(0xFF0F172A)
                         )
                         Text(
                             text = if (isEn) {
-                                "${filteredPois.size} destinations available for GPS & AR exploration"
+                                "${filteredPois.size} places within 50km of (${"%.4f".format(spatialPose.latitude)}, ${"%.4f".format(spatialPose.longitude)})"
                             } else {
-                                "${filteredPois.size} địa danh văn hóa hỗ trợ định vị GPS & AR 360°"
+                                "Hiển thị ${filteredPois.size} điểm trong vùng 50km quanh vị trí đang ở (${"%.4f".format(spatialPose.latitude)}, ${"%.4f".format(spatialPose.longitude)})"
                             },
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B)
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF0284C7),
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
 
@@ -868,8 +908,8 @@ private fun PlacesDirectoryTabScreen(
                     onValueChange = { searchQuery = it },
                     placeholder = {
                         Text(
-                            if (isEn) "Search place name, history, category..."
-                            else "Tìm tên địa danh, câu chuyện lịch sử, danh mục..."
+                            if (isEn) "Search landmarks, Pho, Banh Mi, coffee..."
+                            else "Tìm địa danh, Ăn uống, Phở, Bánh mì, Cà phê..."
                         )
                     },
                     leadingIcon = {
@@ -890,36 +930,37 @@ private fun PlacesDirectoryTabScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(categories) { category ->
-                        val label = when (category) {
-                            "ALL" -> if (isEn) "All Places" else "Tất cả"
-                            "AR_READY" -> if (isEn) "AR Unlocked" else "Đã mở khóa AR"
-                            else -> category
+                    items(filterKeys) { key ->
+                        val label = when (key) {
+                            "ALL" -> if (isEn) "All (≤ 50km)" else "Tất cả (≤ 50km)"
+                            "FOOD" -> if (isEn) "🍽️ Food & Dining (Ăn uống)" else "🍽️ Ăn uống"
+                            "CULTURE" -> if (isEn) "🏛️ Cultural & Heritage" else "🏛️ Di sản & Văn hóa"
+                            "AR_READY" -> if (isEn) "✨ AR Unlocked" else "✨ Đã mở khóa AR"
+                            else -> key
                         }
                         FilterChip(
-                            selected = selectedCategory == category,
-                            onClick = { selectedCategory = category },
-                            label = { Text(label, fontSize = 12.sp) }
+                            selected = selectedCategory == key,
+                            onClick = {
+                                selectedCategory = key
+                                onCategoryChanged(key)
+                            },
+                            label = { Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
                         )
                     }
                 }
             }
         }
 
-        // Places List
+        // Places List within 50km
         LazyColumn(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             items(filteredPois, key = { it.id }) { pin ->
-                val liveDist = LocationAndOrientationTracker.calculateDistanceMeters(
-                    spatialPose.latitude,
-                    spatialPose.longitude,
-                    pin.latitude,
-                    pin.longitude
-                )
+                val liveDist = pin.distanceMeters ?: 0.0
                 val unlocked = pin.canUnlockAr(liveDist)
+                val isFood = isFoodCategory(pin.category)
 
                 Card(
                     shape = RoundedCornerShape(18.dp),
@@ -940,19 +981,30 @@ private fun PlacesDirectoryTabScreen(
                                 modifier = Modifier.fillMaxSize()
                             )
                             Surface(
-                                color = Color(0xFF0F172A).copy(alpha = 0.78f),
+                                color = if (isFood) Color(0xFFE11D48) else Color(0xFF0F172A).copy(alpha = 0.82f),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .padding(10.dp)
                             ) {
-                                Text(
-                                    text = pin.category,
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFood) Icons.Default.Restaurant else Icons.Default.AccountBalance,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = pin.category,
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
 
                             Surface(
@@ -964,9 +1016,9 @@ private fun PlacesDirectoryTabScreen(
                             ) {
                                 Text(
                                     text = if (unlocked) {
-                                        if (isEn) "AR Unlocked • ${liveDist.toInt()}m" else "Mở khóa AR • ${liveDist.toInt()}m"
+                                        if (isEn) "AR Unlocked • ${formatDistanceLabel(liveDist)}" else "Mở khóa AR • ${formatDistanceLabel(liveDist)}"
                                     } else {
-                                        if (isEn) "${liveDist.toInt()}m away" else "Cách ${liveDist.toInt()}m"
+                                        if (isEn) "${formatDistanceLabel(liveDist)} (≤ 50km)" else "Cách ${formatDistanceLabel(liveDist)} (≤ 50km)"
                                     },
                                     color = Color.White,
                                     fontSize = 11.sp,
@@ -1026,7 +1078,7 @@ private fun PlacesDirectoryTabScreen(
                                 ) {
                                     Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text(if (isEn) "Explore Map" else "Bản đồ Khám phá", fontSize = 12.sp)
+                                    Text(if (isEn) "Explore Map" else "Xem trên Bản đồ", fontSize = 12.sp)
                                 }
 
                                 if (!unlocked) {
@@ -1058,7 +1110,7 @@ private fun PlacesDirectoryTabScreen(
 }
 
 // ============================================================================
-// TAB 3: KHÁM PHÁ (EXPLORE MAP & AR TAB - CURRENT APP SCREEN)
+// TAB 3: KHÁM PHÁ (EXPLORE MAP & AR TAB - OPENFREEMAP/BRIGHT + 50KM RADIUS)
 // ============================================================================
 
 @Composable
@@ -1075,7 +1127,7 @@ private fun ExploreMapTabContent(
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 1. MapLibre + OpenFreeMap / OpenStreetMap Map View
+        // 1. MapLibre + OpenFreeMap/Bright Vector Tile Map View
         OpenFreeMapComposeView(
             spatialPose = spatialPose,
             pois = uiState.nearbyPois,
@@ -1091,7 +1143,7 @@ private fun ExploreMapTabContent(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Top Floating Bar (Language Toggle VI/EN, Role & Auth, Admin Console Button)
+        // 2. Top Floating Bar (OpenFreeMap/Bright, 50km Radius, Language VI/EN, Role & Auth)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1113,16 +1165,16 @@ private fun ExploreMapTabContent(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (isEn) "Explore GPS & 360° AR" else "Khám Phá Bản Đồ GPS & AR",
+                            text = if (isEn) "OpenFreeMap/Bright • 50km Zone" else "OpenFreeMap/Bright • Bán kính 50km",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             color = Color(0xFF0F172A)
                         )
                         Text(
                             text = if (uiState.currentUser != null) {
-                                "${uiState.currentUser.displayName} (${uiState.currentUser.role})"
+                                "${uiState.currentUser.displayName} • ${uiState.nearbyPois.size} Pins (≤50km)"
                             } else {
-                                if (isEn) "OpenFreeMap • Tap a Pin to explore" else "OpenFreeMap • Chạm vào Pin để khám phá"
+                                if (isEn) "Tap any Cultural or Food Pin within 50km" else "Chạm vào Pin Văn hóa hoặc Ăn uống trong 50km"
                             },
                             fontSize = 11.5.sp,
                             color = Color(0xFF475569)
@@ -1162,7 +1214,7 @@ private fun ExploreMapTabContent(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (uiState.currentUser.isSuperAdmin) "SuperAdmin" else "Admin",
+                                    text = if (uiState.currentUser.isSuperAdmin) "sa" else "Admin",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1219,7 +1271,7 @@ private fun ExploreMapTabContent(
                 }
             }
 
-            // Horizontal Quick-Select Carousel of Nearby Published POI Pins
+            // Horizontal Quick-Select Carousel of Nearby Published POI Pins within 50km
             Spacer(modifier = Modifier.height(8.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(uiState.nearbyPois, key = { it.id }) { pin ->
@@ -1230,9 +1282,14 @@ private fun ExploreMapTabContent(
                         pin.longitude
                     )
                     val unlocked = pin.canUnlockAr(liveDist)
+                    val isFood = isFoodCategory(pin.category)
                     Surface(
                         shape = RoundedCornerShape(20.dp),
-                        color = if (unlocked) Color(0xFF16A34A) else Color(0xFF0F172A).copy(alpha = 0.88f),
+                        color = when {
+                            unlocked -> Color(0xFF16A34A)
+                            isFood -> Color(0xFFE11D48)
+                            else -> Color(0xFF0F172A).copy(alpha = 0.88f)
+                        },
                         shadowElevation = 3.dp,
                         modifier = Modifier.clickable {
                             viewModel.selectPoiPin(pin.id, spatialPose.latitude, spatialPose.longitude)
@@ -1243,14 +1300,18 @@ private fun ExploreMapTabContent(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                         ) {
                             Icon(
-                                imageVector = if (unlocked) Icons.Default.ViewInAr else Icons.Default.Place,
+                                imageVector = when {
+                                    unlocked -> Icons.Default.ViewInAr
+                                    isFood -> Icons.Default.Restaurant
+                                    else -> Icons.Default.Place
+                                },
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "${pin.title} (${liveDist.toInt()}m)",
+                                text = "${pin.title} (${formatDistanceLabel(liveDist)})",
                                 color = Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -1324,6 +1385,7 @@ private fun InfoAndProfileTabScreen(
     spatialPose: DeviceSpatialPose,
     onSetLanguage: (String) -> Unit,
     onOpenAccountModal: () -> Unit,
+    onQuickLogin: (String, String) -> Unit,
     onOpenAdminConsole: () -> Unit,
     onLogout: () -> Unit
 ) {
@@ -1340,7 +1402,7 @@ private fun InfoAndProfileTabScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text(
-            text = if (isEn) "Information & Account" else "Thông Tin & Tài Khoản",
+            text = if (isEn) "Information & Test Accounts" else "Thông Tin & Tài Khoản Kiểm Thử",
             fontWeight = FontWeight.ExtraBold,
             fontSize = 22.sp,
             color = Color(0xFF0F172A)
@@ -1380,7 +1442,7 @@ private fun InfoAndProfileTabScreen(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = user?.email ?: "",
+                            text = "ID: ${user?.email ?: "-"}",
                             fontSize = 13.sp,
                             color = Color(0xFF64748B)
                         )
@@ -1402,6 +1464,33 @@ private fun InfoAndProfileTabScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                Text(
+                    text = if (isEn) "Switch Dedicated Test Account:" else "Chuyển nhanh 3 tài khoản kiểm thử chuyên biệt:",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.5.sp,
+                    color = Color(0xFF334155)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    AssistChip(
+                        onClick = { onQuickLogin("testapp", "TestApp123456") },
+                        label = { Text("1. testapp (Tourist)", fontSize = 11.sp) }
+                    )
+                    AssistChip(
+                        onClick = { onQuickLogin("testadmin", "TestApp123456") },
+                        label = { Text("2. testadmin (Admin)", fontSize = 11.sp) }
+                    )
+                    AssistChip(
+                        onClick = { onQuickLogin("sa", "AwakenTech150520#") },
+                        label = { Text("3. sa (SuperAdmin)", fontSize = 11.sp) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
                         onClick = onOpenAccountModal,
@@ -1409,7 +1498,7 @@ private fun InfoAndProfileTabScreen(
                     ) {
                         Icon(Icons.Default.SwitchAccount, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (isEn) "Switch Role / Account" else "Đổi Tài Khoản / Vai Trò")
+                        Text(if (isEn) "Enter ID & Password" else "Nhập ID & Mật khẩu")
                     }
 
                     if (user != null) {
@@ -1417,7 +1506,7 @@ private fun InfoAndProfileTabScreen(
                             onClick = onLogout,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626))
                         ) {
-                            Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(if (isEn) "Sign Out" else "Đăng xuất")
                         }
@@ -1436,9 +1525,9 @@ private fun InfoAndProfileTabScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = if (user.isSuperAdmin) {
-                            if (isEn) "SuperAdmin Approval & Moderation" else "Quản Trị Cấp Cao (SuperAdmin)"
+                            if (isEn) "SuperAdmin (sa) Approval & Moderation" else "Quản Trị Chủ Quản (sa - SuperAdmin)"
                         } else {
-                            if (isEn) "Admin Content Management" else "Quản Trị Nội Dung (Admin)"
+                            if (isEn) "Admin (testadmin) Content Management" else "Quản Trị Nội Dung (testadmin - Admin)"
                         },
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp,
@@ -1447,9 +1536,9 @@ private fun InfoAndProfileTabScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (isEn) {
-                            "Create and manage POI pins, cultural stories, 360° AR cards, approve pending POIs, and moderate community photos."
+                            "Create and manage Cultural & Food ('Ăn uống') pins, 360° AR cards, approve pending POIs, and moderate community photos."
                         } else {
-                            "Tạo và quản lý địa điểm (Pin), câu chuyện văn hóa, cấu hình thẻ AR 360°, phê duyệt địa điểm và kiểm duyệt ảnh người dùng."
+                            "Tạo và quản lý địa điểm Văn hóa & Ăn uống (Pin), cấu hình thẻ AR 360°, phê duyệt địa điểm và kiểm duyệt ảnh người dùng."
                         },
                         fontSize = 12.5.sp,
                         color = Color(0xFFB45309)
@@ -1497,7 +1586,7 @@ private fun InfoAndProfileTabScreen(
             }
         }
 
-        // 4. Live GPS & Spatial Sensor Telemetry Card
+        // 4. Live GPS, 50km Radius & OpenFreeMap/Bright Status Card
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -1506,18 +1595,25 @@ private fun InfoAndProfileTabScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = if (isEn) "Live GPS & AR Spatial Sensors" else "Thông Số Định Vị GPS & Cảm Biến AR",
+                    text = if (isEn) "Map Engine & 50km GPS Telemetry" else "Cấu Hình Bản Đồ & Định Vị Vùng 50km",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                     color = Color(0xFF0F172A)
                 )
                 Text(
-                    text = "Latitude: ${"%.6f".format(spatialPose.latitude)}",
-                    fontSize = 13.sp,
-                    color = Color(0xFF334155)
+                    text = "Map Style: OpenFreeMap/Bright (https://tiles.openfreemap.org/styles/bright)",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF0284C7)
                 )
                 Text(
-                    text = "Longitude: ${"%.6f".format(spatialPose.longitude)}",
+                    text = if (isEn) "Active Search Radius: 50.0 km around current GPS" else "Bán kính hiển thị địa điểm & Ăn uống: 50.0 km quanh vị trí đang ở",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF15803D)
+                )
+                Text(
+                    text = "Latitude: ${"%.6f".format(spatialPose.latitude)} | Longitude: ${"%.6f".format(spatialPose.longitude)}",
                     fontSize = 13.sp,
                     color = Color(0xFF334155)
                 )
@@ -1532,37 +1628,11 @@ private fun InfoAndProfileTabScreen(
                 )
             }
         }
-
-        // 5. About Sightseeing Travel Platform
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = if (isEn) "About Sightseeing Travel" else "Giới Thiệu Ứng Dụng Sightseeing Travel",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = Color(0xFF0F172A)
-                )
-                Text(
-                    text = if (isEn) {
-                        "Version 1.0.0 • Cultural Sightseeing, Live GPS Map (OpenFreeMap / Apple MapKit), 360° Spatial AR Camera & Community Photo Sharing."
-                    } else {
-                        "Phiên bản 1.0.0 • Nền tảng khám phá văn hóa du lịch, định vị bản đồ GPS (OpenFreeMap / Apple MapKit), Camera Thực tế tăng cường (AR) 360° và chia sẻ ảnh cộng đồng."
-                    },
-                    fontSize = 13.sp,
-                    color = Color(0xFF475569)
-                )
-            }
-        }
     }
 }
 
 /**
- * Interactive Bottom Sheet Card showing the POI's Cultural Story, Historical Period,
+ * Interactive Bottom Sheet Card showing the POI's Cultural/Culinary Story,
  * Geofence AR Unlock button (`distance <= activationRadiusMeters + 20m`), and Community Photos.
  */
 @Composable
@@ -1581,6 +1651,7 @@ private fun PoiCulturalStoryCard(
     modifier: Modifier = Modifier
 ) {
     val isEn = selectedLanguage.equals("en", ignoreCase = true)
+    val isFood = isFoodCategory(detail.category)
 
     Surface(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -1604,12 +1675,12 @@ private fun PoiCulturalStoryCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            color = Color(0xFFE0F2FE),
+                            color = if (isFood) Color(0xFFFFE4E6) else Color(0xFFE0F2FE),
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
                                 text = detail.category,
-                                color = Color(0xFF0369A1),
+                                color = if (isFood) Color(0xFFE11D48) else Color(0xFF0369A1),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -1617,7 +1688,7 @@ private fun PoiCulturalStoryCard(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "${liveDistanceMeters.toInt()}m away (Unlock <= ${(detail.activationRadiusMeters + 20).toInt()}m)",
+                            text = "${formatDistanceLabel(liveDistanceMeters)} (AR <= ${(detail.activationRadiusMeters + 20).toInt()}m)",
                             fontSize = 11.5.sp,
                             color = if (isArUnlocked) Color(0xFF15803D) else Color(0xFFB45309),
                             fontWeight = FontWeight.SemiBold
@@ -1657,7 +1728,7 @@ private fun PoiCulturalStoryCard(
                         text = if (isArUnlocked) {
                             if (isEn) "Open 360° AR Camera" else "Mở Camera Thực tế ảo AR"
                         } else {
-                            if (isEn) "AR Locked (${liveDistanceMeters.toInt()}m)" else "Chưa vào vùng AR (${liveDistanceMeters.toInt()}m)"
+                            if (isEn) "AR Locked (${formatDistanceLabel(liveDistanceMeters)})" else "Chưa vào vùng AR (${formatDistanceLabel(liveDistanceMeters)})"
                         },
                         fontWeight = FontWeight.Bold
                     )
@@ -1713,7 +1784,7 @@ private fun PoiCulturalStoryCard(
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(10.dp))
 
             // Highlighted Community Photos Carousel
@@ -1816,12 +1887,16 @@ private fun PoiCulturalStoryCard(
 }
 
 /**
- * JWT Authentication & Quick Role Switcher Dialog supporting `Tourist`, `Admin`, and `SuperAdmin`.
+ * JWT Authentication & Dedicated Role Switcher Dialog supporting:
+ * 1. Tourist: ID = `testapp` | Password = `TestApp123456`
+ * 2. Admin: ID = `testadmin` | Password = `TestApp123456`
+ * 3. SuperAdmin: ID = `sa` | Password = `AwakenTech150520#`
  */
 @Composable
 private fun AuthAndRoleDialog(
     currentUser: UserProfileDto?,
     selectedLanguage: String,
+    errorMessage: String?,
     onLogin: (String, String) -> Unit,
     onRegister: (String, String, String) -> Unit,
     onLogout: () -> Unit,
@@ -1829,34 +1904,50 @@ private fun AuthAndRoleDialog(
 ) {
     val isEn = selectedLanguage.equals("en", ignoreCase = true)
     var isRegisterMode by remember { mutableStateOf(false) }
-    var email by remember { mutableStateOf(currentUser?.email ?: "tourist@awaken.vn") }
-    var password by remember { mutableStateOf("Travel@2026") }
-    var displayName by remember { mutableStateOf("Minh Traveler") }
+    var accountId by remember { mutableStateOf(currentUser?.email ?: "testapp") }
+    var password by remember { mutableStateOf("TestApp123456") }
+    var displayName by remember { mutableStateOf("Du Khách") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
                 text = if (currentUser != null) {
-                    "Account (${currentUser.role})"
+                    if (isEn) "Account (${currentUser.role})" else "Tài khoản (${currentUser.role})"
                 } else if (isRegisterMode) {
-                    "Register Tourist Account"
+                    if (isEn) "Register Tourist Account" else "Đăng ký Du khách"
                 } else {
-                    "Sign In (JWT Auth)"
-                }
+                    if (isEn) "Sign In (Sightseeing Travel)" else "Đăng Nhập Hệ Thống"
+                },
+                fontWeight = FontWeight.Bold
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (currentUser != null) {
-                    Text("Signed in as: ${currentUser.displayName}")
-                    Text("Email: ${currentUser.email}")
+                    Text("${if (isEn) "Signed in as" else "Đang đăng nhập"}: ${currentUser.displayName}")
+                    Text("ID: ${currentUser.email}")
                     Text("Role: ${currentUser.role}", fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                if (!errorMessage.isNullOrBlank()) {
+                    Surface(
+                        color = Color(0xFFFEE2E2),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = errorMessage,
+                            color = Color(0xFF991B1B),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
                 }
 
                 Text(
-                    text = if (isEn) "Quick Role Sign-In Presets:" else "Chọn nhanh vai trò kiểm thử:",
+                    text = if (isEn) "Quick Fill & Sign-In Test Accounts:" else "Chọn nhanh 3 tài khoản kiểm thử:",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1865,76 +1956,81 @@ private fun AuthAndRoleDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     AssistChip(
-                        onClick = { onLogin("tourist@awaken.vn", "Travel@2026") },
-                        label = { Text("Tourist", fontSize = 11.sp) }
+                        onClick = {
+                            accountId = "testapp"
+                            password = "TestApp123456"
+                            onLogin("testapp", "TestApp123456")
+                        },
+                        label = { Text("testapp", fontSize = 11.sp) }
                     )
                     AssistChip(
-                        onClick = { onLogin("admin@awaken.vn", "Admin@2026") },
-                        label = { Text("Admin", fontSize = 11.sp) }
+                        onClick = {
+                            accountId = "testadmin"
+                            password = "TestApp123456"
+                            onLogin("testadmin", "TestApp123456")
+                        },
+                        label = { Text("testadmin", fontSize = 11.sp) }
                     )
                     AssistChip(
-                        onClick = { onLogin("superadmin@awaken.vn", "SuperAdmin@2026") },
-                        label = { Text("SuperAdmin", fontSize = 11.sp) }
+                        onClick = {
+                            accountId = "sa"
+                            password = "AwakenTech150520#"
+                            onLogin("sa", "AwakenTech150520#")
+                        },
+                        label = { Text("sa (SuperAdmin)", fontSize = 11.sp) }
                     )
                 }
 
-                Divider(modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 if (isRegisterMode) {
                     OutlinedTextField(
                         value = displayName,
                         onValueChange = { displayName = it },
-                        label = { Text("Display Name") },
+                        label = { Text(if (isEn) "Display Name" else "Tên hiển thị") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
                 OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Email") },
+                    value = accountId,
+                    onValueChange = { accountId = it },
+                    label = { Text(if (isEn) "Account ID (testapp / testadmin / sa)" else "ID Tài khoản (testapp / testadmin / sa)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("Password") },
+                    label = { Text(if (isEn) "Password" else "Mật khẩu") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                TextButton(onClick = { isRegisterMode = !isRegisterMode }) {
-                    Text(
-                        if (isRegisterMode) "Already have an account? Sign In"
-                        else "New traveler? Create a Tourist account"
-                    )
-                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     if (isRegisterMode) {
-                        onRegister(email, password, displayName)
+                        onRegister(accountId, password, displayName)
                     } else {
-                        onLogin(email, password)
+                        onLogin(accountId, password)
                     }
                 }
             ) {
-                Text(if (isRegisterMode) "Register" else "Sign In")
+                Text(if (isRegisterMode) (if (isEn) "Register" else "Đăng ký") else (if (isEn) "Sign In" else "Đăng nhập"))
             }
         },
         dismissButton = {
             Row {
                 if (currentUser != null) {
                     TextButton(onClick = onLogout) {
-                        Text("Sign Out", color = MaterialTheme.colorScheme.error)
+                        Text(if (isEn) "Sign Out" else "Đăng xuất", color = MaterialTheme.colorScheme.error)
                     }
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("Close")
+                    TextButton(onClick = onDismiss) {
+                        Text(if (isEn) "Close" else "Đóng")
+                    }
                 }
             }
         }

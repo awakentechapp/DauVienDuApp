@@ -39,28 +39,28 @@ public static class DatabaseInitializerAndSeeder
         User admin;
         User tourist;
 
-        // 1. Seed 3 Users (SuperAdmin, Admin, Tourist)
+        // 1. Seed 3 Dedicated Test Accounts (SuperAdmin: sa, Admin: testadmin, Tourist: testapp)
         if (!await identityDb.Users.AnyAsync(cancellationToken))
         {
             superAdmin = User.CreateStaff(
-                "superadmin@sightseeing.vn",
-                passwordHasher.HashPassword("SuperAdmin@123"),
-                "Chủ Quản Hệ Thống (SuperAdmin)",
+                "sa",
+                passwordHasher.HashPassword("AwakenTech150520#"),
+                "Chủ Quản Hệ Thống (sa)",
                 UserRole.SuperAdmin,
                 SupportedLanguages.Vietnamese);
 
             admin = User.CreateStaff(
-                "admin@sightseeing.vn",
-                passwordHasher.HashPassword("Admin@12345"),
-                "Quản Trị Viên Nội Dung (Admin)",
+                "testadmin",
+                passwordHasher.HashPassword("TestApp123456"),
+                "Quản Trị Viên Nội Dung (testadmin)",
                 UserRole.Admin,
                 SupportedLanguages.Vietnamese);
 
             tourist = User.CreateTourist(
-                "tourist@sightseeing.vn",
-                passwordHasher.HashPassword("Tourist@123"),
-                "Alex Rivera (Tourist)",
-                SupportedLanguages.English);
+                "testapp",
+                passwordHasher.HashPassword("TestApp123456"),
+                "Du Khách Kiểm Thử (testapp)",
+                SupportedLanguages.Vietnamese);
 
             identityDb.Users.AddRange(superAdmin, admin, tourist);
             await identityDb.SaveChangesAsync(cancellationToken);

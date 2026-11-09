@@ -15,7 +15,6 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.awaken.sightseeingtravel.BuildConfig
 import com.awaken.sightseeingtravel.core.model.PoiPinSummaryDto
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.google.gson.JsonObject
@@ -35,10 +34,15 @@ import org.maplibre.geojson.Point
 import kotlin.math.abs
 
 /**
+ * Official OpenFreeMap/Bright Vector Tile Style URL for Android MapLibre.
+ */
+const val OPENFREEMAP_BRIGHT_STYLE_URL = "https://tiles.openfreemap.org/styles/bright"
+
+/**
  * Native MapLibre GL Compose View (`org.maplibre.gl:android-sdk`) configured with:
- * - Primary vector tile style: OpenFreeMap Bright (`https://tiles.openfreemap.org/styles/bright`)
- * - Automatic OpenStreetMap Raster Tile JSON fallback so the map renders reliably in all network conditions
- * - Real-time GPS Location Marker + Published POI Heritage Pins with tap-to-inspect support
+ * - Vector tile style: `OpenFreeMap/Bright` (`https://tiles.openfreemap.org/styles/bright`)
+ * - Automatic OpenStreetMap Raster Tile JSON fallback if vector tiles are unreachable
+ * - Real-time GPS Location Marker + Published POI Heritage & Food (`Ăn uống`) Pins within 50km radius
  */
 @Composable
 fun OpenFreeMapComposeView(
@@ -96,9 +100,9 @@ fun OpenFreeMapComposeView(
                 CameraUpdateFactory.newCameraPosition(
                     CameraPosition.Builder()
                         .target(LatLng(spatialPose.latitude, spatialPose.longitude))
-                        .zoom(16.2)
+                        .zoom(14.8)
                         .bearing(spatialPose.azimuthDegrees.toDouble())
-                        .tilt(35.0)
+                        .tilt(30.0)
                         .build()
                 ),
                 900
@@ -124,7 +128,7 @@ fun OpenFreeMapComposeView(
             map.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
                     LatLng(spatialPose.latitude, spatialPose.longitude),
-                    15.6
+                    14.5
                 ),
                 750
             )
@@ -136,6 +140,22 @@ fun OpenFreeMapComposeView(
             modifier = Modifier.fillMaxSize(),
             factory = {
                 mapView.apply {
+                    // Fallback to OpenStreetMap if OpenFreeMap/Bright style fails to load
+                    addOnDidFailLoadingMapListener {
+                        mapLibreInstance?.setStyle(
+                            Style.Builder().fromJson(buildOpenStreetMapFallbackStyleJson())
+                        ) { fallbackStyle ->
+                            setupCustomPinBitmapsAndLayers(context, fallbackStyle)
+                            isStyleReady = true
+                            updateGeoJsonLayers(
+                                style = fallbackStyle,
+                                spatialPose = spatialPose,
+                                pois = currentPois,
+                                selectedPoiId = selectedPoiId
+                            )
+                        }
+                    }
+
                     getMapAsync { map ->
                         mapLibreInstance = map
                         map.uiSettings.isCompassEnabled = true
@@ -143,7 +163,7 @@ fun OpenFreeMapComposeView(
                         map.uiSettings.isTiltGesturesEnabled = true
                         map.uiSettings.isAttributionEnabled = true
 
-                        loadOpenFreeMapWithOsmFallback(
+                        loadOpenFreeMapBrightStyle(
                             context = context,
                             map = map,
                             onStyleReady = { style ->
@@ -172,8 +192,8 @@ fun OpenFreeMapComposeView(
                                 abs(pin.latitude - tapLatLng.latitude) + abs(pin.longitude - tapLatLng.longitude)
                             }
                             if (closest != null &&
-                                abs(closest.latitude - tapLatLng.latitude) < 0.0006 &&
-                                abs(closest.longitude - tapLatLng.longitude) < 0.0006
+                                abs(closest.latitude - tapLatLng.latitude) < 0.0008 &&
+                                abs(closest.longitude - tapLatLng.longitude) < 0.0008
                             ) {
                                 currentOnPoiClick(closest)
                                 true
@@ -195,6 +215,7 @@ private const val ICON_USER_GPS = "icon-user-gps"
 private const val SOURCE_POI_PINS = "source-poi-pins"
 private const val LAYER_POI_PINS = "layer-poi-pins"
 private const val ICON_POI_LOCKED = "icon-poi-locked"
+private const val ICON_POI_FOOD = "icon-poi-food"
 private const val ICON_POI_UNLOCKED = "icon-poi-unlocked"
 private const val ICON_POI_SELECTED = "icon-poi-selected"
 
@@ -203,16 +224,14 @@ private const val PROP_POI_TITLE = "poi_title"
 private const val PROP_POI_ICON = "poi_icon"
 
 /**
- * Loads OpenFreeMap Bright style (`https://tiles.openfreemap.org/styles/bright`) and attaches
- * an OpenStreetMap raster tile fallback if OpenFreeMap vector tiles are unreachable.
+ * Loads `OpenFreeMap/Bright` vector style (`https://tiles.openfreemap.org/styles/bright`).
  */
-private fun loadOpenFreeMapWithOsmFallback(
+private fun loadOpenFreeMapBrightStyle(
     context: Context,
     map: MapLibreMap,
     onStyleReady: (Style) -> Unit
 ) {
-    val openFreeMapUrl = BuildConfig.OPENFREEMAP_STYLE_URL
-    map.setStyle(Style.Builder().fromUri(openFreeMapUrl)) { style ->
+    map.setStyle(Style.Builder().fromUri(OPENFREEMAP_BRIGHT_STYLE_URL)) { style ->
         setupCustomPinBitmapsAndLayers(context, style)
         onStyleReady(style)
     }
@@ -224,7 +243,7 @@ private fun loadOpenFreeMapWithOsmFallback(
 fun buildOpenStreetMapFallbackStyleJson(): String = """
 {
   "version": 8,
-  "name": "OpenStreetMap Standard Fallback",
+  "name": "OpenFreeMap/Bright - OSM Fallback",
   "sources": {
     "osm-raster-tiles": {
       "type": "raster",
@@ -232,7 +251,7 @@ fun buildOpenStreetMapFallbackStyleJson(): String = """
         "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       ],
       "tileSize": 256,
-      "attribution": "© OpenStreetMap contributors"
+      "attribution": "© OpenFreeMap/Bright • © OpenStreetMap contributors"
     }
   },
   "layers": [
@@ -251,6 +270,7 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     val density = context.resources.displayMetrics.density
     style.addImage(ICON_USER_GPS, createUserGpsDotBitmap(density))
     style.addImage(ICON_POI_LOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#0284C7"), ringColor = Color.WHITE))
+    style.addImage(ICON_POI_FOOD, createPoiPinBitmap(density, fillColor = Color.parseColor("#E11D48"), ringColor = Color.parseColor("#FFE4E6")))
     style.addImage(ICON_POI_UNLOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#16A34A"), ringColor = Color.parseColor("#BBF7D0")))
     style.addImage(ICON_POI_SELECTED, createPoiPinBitmap(density, fillColor = Color.parseColor("#EA580C"), ringColor = Color.parseColor("#FEF08A")))
 
@@ -301,9 +321,13 @@ private fun updateGeoJsonLayers(
     val poiSource = style.getSourceAs<GeoJsonSource>(SOURCE_POI_PINS)
     val features = pois.map { poi ->
         val isUnlocked = poi.canUnlockAr(poi.distanceMeters)
+        val isFood = poi.category.contains("Ăn uống", ignoreCase = true) ||
+            poi.category.contains("Food", ignoreCase = true) ||
+            poi.category.contains("Ẩm thực", ignoreCase = true)
         val iconKey = when {
             poi.id == selectedPoiId -> ICON_POI_SELECTED
             isUnlocked -> ICON_POI_UNLOCKED
+            isFood -> ICON_POI_FOOD
             else -> ICON_POI_LOCKED
         }
         val props = JsonObject().apply {

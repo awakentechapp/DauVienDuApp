@@ -526,9 +526,26 @@ private fun CreatePoiDialog(
                 OutlinedTextField(
                     value = category,
                     onValueChange = { category = it },
-                    label = { Text("Category") },
+                    label = { Text("Category (e.g., Ăn uống, Architecture & Heritage)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    AssistChip(
+                        onClick = { category = "Ăn uống" },
+                        label = { Text("Ăn uống", fontSize = 11.sp) }
+                    )
+                    AssistChip(
+                        onClick = { category = "Architecture & Heritage" },
+                        label = { Text("Di sản", fontSize = 11.sp) }
+                    )
+                    AssistChip(
+                        onClick = { category = "Historic Landmark" },
+                        label = { Text("Di tích", fontSize = 11.sp) }
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = latitudeText,

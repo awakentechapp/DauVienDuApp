@@ -54,7 +54,7 @@ interface SightseeingApiService {
     suspend fun getNearbyPois(
         @Query("lat") latitude: Double,
         @Query("lng") longitude: Double,
-        @Query("radiusKm") radiusKm: Double = 10.0,
+        @Query("radiusKm") radiusKm: Double = 50.0,
         @Query("lang") language: String = "vi"
     ): ApiEnvelope<List<PoiPinSummaryDto>>
 

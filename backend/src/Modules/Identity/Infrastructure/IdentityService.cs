@@ -395,11 +395,11 @@ public sealed class IdentityService : IIdentityService
 
     private static Error? ValidateRegistrationInputs(string email, string password, string displayName)
     {
-        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+        if (string.IsNullOrWhiteSpace(email) || email.Trim().Length < 2)
         {
             return new Error(
                 "VALIDATION_ERROR",
-                "A valid email address is required.",
+                "A valid account ID or email address is required.",
                 ErrorType.Validation);
         }
 
