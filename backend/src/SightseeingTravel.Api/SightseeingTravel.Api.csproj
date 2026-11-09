@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SightseeingTravel.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="3.7.405.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SightseeingTravel.SharedKernel\SightseeingTravel.SharedKernel.csproj" />
+    <ProjectReference Include="..\Modules\Identity\SightseeingTravel.Modules.Identity.csproj" />
+    <ProjectReference Include="..\Modules\Attractions\SightseeingTravel.Modules.Attractions.csproj" />
+    <ProjectReference Include="..\Modules\ArExperience\SightseeingTravel.Modules.ArExperience.csproj" />
+    <ProjectReference Include="..\Modules\CommunityMedia\SightseeingTravel.Modules.CommunityMedia.csproj" />
+  </ItemGroup>
+
+</Project>

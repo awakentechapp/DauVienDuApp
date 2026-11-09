@@ -1,0 +1,31 @@
+# Environment & Secrets
+.env
+*.env.local
+
+# .NET / C# Build Artifacts
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+
+# Android / Gradle Build Artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.iml
+.idea/
+*.hprof
+hs_err_pid*.log
+
+# iOS / Xcode / SwiftPM Build Artifacts
+ios/.build/
+ios/.swiftpm/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+DerivedData/
+.DS_Store
+
+# Built APK binary at root (optional - keep repo lightweight)
+SightseeingTravel-debug.apk
