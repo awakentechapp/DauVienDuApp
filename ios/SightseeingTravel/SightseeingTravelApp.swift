@@ -153,53 +153,57 @@ public struct SightseeingTravelApp: App {
     }
 }
 
-// MARK: - Main Authenticated Tab Router
+// MARK: - Main Authenticated 4-Tab Router (Trang chủ, Địa điểm, Khám phá, Thông tin)
 
 public struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var locationManager: LocationManager
-    @State private var selectedTab: Int = 0
+    @State private var selectedTab: Int = 2 // Mặc định có thể chuyển giữa 4 tab: 0-Trang chủ, 1-Địa điểm, 2-Khám phá, 3-Thông tin
 
     public init() {}
 
     public var body: some View {
         TabView(selection: $selectedTab) {
+            // 1. Trang chủ
+            HomePortalView(onSwitchTab: { tabIndex in
+                selectedTab = tabIndex
+            })
+            .tabItem {
+                Label(
+                    appState.selectedLanguage == .vi ? "Trang chủ" : "Home",
+                    systemImage: "house.fill"
+                )
+            }
+            .tag(0)
+
+            // 2. Địa điểm
+            PlacesDirectoryView(onOpenExploreTab: {
+                selectedTab = 2
+            })
+            .tabItem {
+                Label(
+                    appState.selectedLanguage == .vi ? "Địa điểm" : "Places",
+                    systemImage: "mappin.and.ellipse"
+                )
+            }
+            .tag(1)
+
+            // 3. Khám phá (Trang Bản đồ GPS & AR hiện tại của app)
             SightseeingMapScreen()
                 .tabItem {
                     Label(
-                        appState.selectedLanguage == .vi ? "Bản đồ & AR" : "Map & AR",
-                        systemImage: "map.fill"
+                        appState.selectedLanguage == .vi ? "Khám phá" : "Explore",
+                        systemImage: "safari.fill"
                     )
                 }
-                .tag(0)
+                .tag(2)
 
-            MyPhotosView()
-                .tabItem {
-                    Label(
-                        appState.selectedLanguage == .vi ? "Ảnh của tôi" : "My Photos",
-                        systemImage: "photo.on.rectangle.angled"
-                    )
-                }
-                .tag(1)
-
-            if let role = appState.currentUser?.role, role.isAdminOrAbove {
-                AdminModerationConsoleView()
-                    .tabItem {
-                        Label(
-                            role.isSuperAdmin
-                                ? (appState.selectedLanguage == .vi ? "Duyệt & Quản trị" : "SuperAdmin")
-                                : (appState.selectedLanguage == .vi ? "Quản trị POI" : "Admin Console"),
-                            systemImage: "checkmark.shield.fill"
-                        )
-                    }
-                    .tag(2)
-            }
-
+            // 4. Thông tin
             ProfileSettingsView()
                 .tabItem {
                     Label(
-                        appState.selectedLanguage == .vi ? "Tài khoản" : "Profile",
-                        systemImage: "person.crop.circle.fill"
+                        appState.selectedLanguage == .vi ? "Thông tin" : "Info",
+                        systemImage: "info.circle.fill"
                     )
                 }
                 .tag(3)
@@ -207,6 +211,330 @@ public struct MainTabView: View {
         .tint(.teal)
         .onAppear {
             locationManager.requestPermissionsAndStartTracking()
+        }
+    }
+}
+
+// MARK: - Tab 1: Trang chủ (Home Portal View)
+
+public struct HomePortalView: View {
+    @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var locationManager: LocationManager
+    @State private var featuredPois: [NearbyPoiDto] = []
+    @State private var selectedPoiForDetail: NearbyPoiDto?
+    @State private var arActivePoi: NearbyPoiDto?
+    public let onSwitchTab: (Int) -> Void
+
+    public init(onSwitchTab: @escaping (Int) -> Void) {
+        self.onSwitchTab = onSwitchTab
+    }
+
+    public var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // Hero Banner
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text(
+                                appState.selectedLanguage == .vi
+                                    ? "DU LỊCH VĂN HÓA & THỰC TẾ TĂNG CƯỜNG AR"
+                                    : "CULTURAL SIGHTSEEING & 360° AR"
+                            )
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.teal)
+
+                            Spacer()
+
+                            Button {
+                                let nextLang: AppLanguage = appState.selectedLanguage == .vi ? .en : .vi
+                                Task { await appState.switchLanguage(nextLang) }
+                            } label: {
+                                Text(appState.selectedLanguage.rawValue.uppercased())
+                                    .font(.caption.weight(.bold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Color.teal.opacity(0.18))
+                                    .foregroundStyle(.teal)
+                                    .clipShape(Capsule())
+                            }
+                        }
+
+                        Text(
+                            appState.selectedLanguage == .vi
+                                ? "Xin chào, \(appState.currentUser?.displayName ?? "Du khách")!"
+                                : "Welcome, \(appState.currentUser?.displayName ?? "Traveler")!"
+                        )
+                        .font(.title2.weight(.heavy))
+
+                        Text(
+                            appState.selectedLanguage == .vi
+                                ? "Khám phá câu chuyện lịch sử tại từng địa danh qua bản đồ GPS trực tiếp và mở Camera AR 360° để xem thông tin cùng ảnh đẹp từ cộng đồng."
+                                : "Explore cultural stories at historical landmarks via live GPS and unlock the 360° AR Camera to view spatial cards and community photos."
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                        HStack(spacing: 12) {
+                            Button {
+                                onSwitchTab(2)
+                            } label: {
+                                Label(
+                                    appState.selectedLanguage == .vi ? "Mở Khám Phá (Map & AR)" : "Open Explore Map",
+                                    systemImage: "safari.fill"
+                                )
+                                .font(.subheadline.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.teal)
+
+                            Button {
+                                onSwitchTab(1)
+                            } label: {
+                                Label(
+                                    appState.selectedLanguage == .vi ? "Xem Địa Điểm" : "All Places",
+                                    systemImage: "mappin.and.ellipse"
+                                )
+                                .font(.subheadline.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(18)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                    // Featured Destinations Section
+                    HStack {
+                        Text(
+                            appState.selectedLanguage == .vi
+                                ? "Địa Điểm Văn Hóa Nổi Bật"
+                                : "Featured Cultural Destinations"
+                        )
+                        .font(.headline)
+                        Spacer()
+                        Button(appState.selectedLanguage == .vi ? "Xem tất cả" : "See All") {
+                            onSwitchTab(1)
+                        }
+                        .font(.subheadline)
+                    }
+
+                    ForEach(featuredPois) { poi in
+                        let liveDist = locationManager.distanceInMeters(
+                            toLatitude: poi.latitude,
+                            longitude: poi.longitude
+                        )
+                        let isUnlocked = poi.isWithinGeofence(userDistanceMeters: liveDist)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text(poi.category.uppercased())
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.teal)
+                                Spacer()
+                                Text(
+                                    isUnlocked
+                                        ? (appState.selectedLanguage == .vi ? "Đã mở khóa AR • \(Int(liveDist))m" : "AR Ready • \(Int(liveDist))m")
+                                        : "\(Int(liveDist))m"
+                                )
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(isUnlocked ? .green : .orange)
+                            }
+
+                            Text(poi.name)
+                                .font(.title3.weight(.bold))
+
+                            Text(poi.shortSummary)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+
+                            HStack(spacing: 10) {
+                                Button {
+                                    selectedPoiForDetail = poi
+                                } label: {
+                                    Label(
+                                        appState.selectedLanguage == .vi ? "Câu chuyện & Ảnh" : "Story & Photos",
+                                        systemImage: "book.pages.fill"
+                                    )
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button {
+                                    onSwitchTab(2)
+                                } label: {
+                                    Label(
+                                        appState.selectedLanguage == .vi ? "Định vị Khám phá" : "Locate on Map",
+                                        systemImage: "map.fill"
+                                    )
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.teal)
+                            }
+                        }
+                        .padding(16)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle(appState.selectedLanguage == .vi ? "Trang Chủ" : "Home")
+            .task(id: appState.selectedLanguage) {
+                featuredPois = (try? await APIClient.shared.getNearbyPois(
+                    lat: locationManager.latitude,
+                    lng: locationManager.longitude,
+                    radiusKm: 15.0,
+                    lang: appState.selectedLanguage
+                )) ?? []
+            }
+            .sheet(item: $selectedPoiForDetail) { poi in
+                PoiDetailSheetView(
+                    poiSummary: poi,
+                    onLaunchArExperience: { targetPoi in
+                        selectedPoiForDetail = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            arActivePoi = targetPoi
+                        }
+                    }
+                )
+                .environmentObject(appState)
+                .environmentObject(locationManager)
+            }
+            .fullScreenCover(item: $arActivePoi) { poi in
+                ArCameraExperienceView(poi: poi)
+                    .environmentObject(appState)
+                    .environmentObject(locationManager)
+            }
+        }
+    }
+}
+
+// MARK: - Tab 2: Địa điểm (Places Directory View)
+
+public struct PlacesDirectoryView: View {
+    @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var locationManager: LocationManager
+    @State private var allPois: [NearbyPoiDto] = []
+    @State private var searchText: String = ""
+    @State private var selectedPoi: NearbyPoiDto?
+    @State private var arActivePoi: NearbyPoiDto?
+    public let onOpenExploreTab: () -> Void
+
+    public init(onOpenExploreTab: @escaping () -> Void) {
+        self.onOpenExploreTab = onOpenExploreTab
+    }
+
+    private var filteredPois: [NearbyPoiDto] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return allPois
+        }
+        return allPois.filter {
+            $0.name.localizedCaseInsensitiveContains(searchText) ||
+            $0.shortSummary.localizedCaseInsensitiveContains(searchText) ||
+            $0.category.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    public var body: some View {
+        NavigationStack {
+            List(filteredPois) { poi in
+                let liveDist = locationManager.distanceInMeters(
+                    toLatitude: poi.latitude,
+                    longitude: poi.longitude
+                )
+                let isUnlocked = poi.isWithinGeofence(userDistanceMeters: liveDist)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(poi.category.uppercased())
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.teal)
+                        Spacer()
+                        Text(
+                            isUnlocked
+                                ? (appState.selectedLanguage == .vi ? "Sẵn sàng mở AR (\(Int(liveDist))m)" : "AR Unlocked (\(Int(liveDist))m)")
+                                : (appState.selectedLanguage == .vi ? "Cách \(Int(liveDist))m" : "\(Int(liveDist))m away")
+                        )
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(isUnlocked ? .green : .secondary)
+                    }
+
+                    Text(poi.name)
+                        .font(.headline)
+
+                    Text(poi.shortSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+
+                    HStack(spacing: 10) {
+                        Button {
+                            selectedPoi = poi
+                        } label: {
+                            Label(
+                                appState.selectedLanguage == .vi ? "Chi tiết & Ảnh" : "Details & Photos",
+                                systemImage: "book.pages.fill"
+                            )
+                            .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            onOpenExploreTab()
+                        } label: {
+                            Label(
+                                appState.selectedLanguage == .vi ? "Bản đồ Khám phá" : "Explore Map",
+                                systemImage: "safari.fill"
+                            )
+                            .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.teal)
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(.vertical, 6)
+            }
+            .searchable(
+                text: $searchText,
+                prompt: appState.selectedLanguage == .vi
+                    ? "Tìm tên địa danh, lịch sử, danh mục..."
+                    : "Search place name, history, category..."
+            )
+            .navigationTitle(appState.selectedLanguage == .vi ? "Địa Điểm" : "Places")
+            .task(id: appState.selectedLanguage) {
+                allPois = (try? await APIClient.shared.getNearbyPois(
+                    lat: locationManager.latitude,
+                    lng: locationManager.longitude,
+                    radiusKm: 20.0,
+                    lang: appState.selectedLanguage
+                )) ?? []
+            }
+            .sheet(item: $selectedPoi) { poi in
+                PoiDetailSheetView(
+                    poiSummary: poi,
+                    onLaunchArExperience: { targetPoi in
+                        selectedPoi = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            arActivePoi = targetPoi
+                        }
+                    }
+                )
+                .environmentObject(appState)
+                .environmentObject(locationManager)
+            }
+            .fullScreenCover(item: $arActivePoi) { poi in
+                ArCameraExperienceView(poi: poi)
+                    .environmentObject(appState)
+                    .environmentObject(locationManager)
+            }
         }
     }
 }
@@ -221,104 +549,102 @@ public struct MyPhotosView: View {
     public init() {}
 
     public var body: some View {
-        NavigationStack {
-            Group {
-                if appState.myUploadedPhotos.isEmpty {
-                    ContentUnavailableView(
+        Group {
+            if appState.myUploadedPhotos.isEmpty {
+                ContentUnavailableView(
+                    appState.selectedLanguage == .vi
+                        ? "Chưa có ảnh kỷ niệm nào"
+                        : "No Captured Photos Yet",
+                    systemImage: "camera.viewfinder",
+                    description: Text(
                         appState.selectedLanguage == .vi
-                            ? "Chưa có ảnh kỷ niệm nào"
-                            : "No Captured Photos Yet",
-                        systemImage: "camera.viewfinder",
-                        description: Text(
-                            appState.selectedLanguage == .vi
-                                ? "Hãy di chuyển đến các điểm tham quan trên bản đồ, mở khóa trải nghiệm AR hoặc chụp ảnh tại điểm để chia sẻ cùng cộng đồng!"
-                                : "Visit published POIs on the map, unlock the AR camera, and capture on-site photos to share with fellow travelers!"
-                        )
+                            ? "Hãy di chuyển đến các điểm tham quan trên bản đồ, mở khóa trải nghiệm AR hoặc chụp ảnh tại điểm để chia sẻ cùng cộng đồng!"
+                            : "Visit published POIs on the map, unlock the AR camera, and capture on-site photos to share with fellow travelers!"
                     )
-                } else {
-                    List {
-                        ForEach(appState.myUploadedPhotos) { photo in
-                            HStack(spacing: 14) {
-                                AsyncImage(url: URL(string: photo.bestThumbnailOrImageUrl)) { phase in
-                                    switch phase {
-                                    case .success(let img):
-                                        img.resizable().scaledToFill()
-                                    default:
-                                        ZStack {
-                                            Color.gray.opacity(0.18)
-                                            Image(systemName: "photo")
-                                                .foregroundStyle(.secondary)
-                                        }
+                )
+            } else {
+                List {
+                    ForEach(appState.myUploadedPhotos) { photo in
+                        HStack(spacing: 14) {
+                            AsyncImage(url: URL(string: photo.bestThumbnailOrImageUrl)) { phase in
+                                switch phase {
+                                case .success(let img):
+                                    img.resizable().scaledToFill()
+                                default:
+                                    ZStack {
+                                        Color.gray.opacity(0.18)
+                                        Image(systemName: "photo")
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
-                                .frame(width: 84, height: 84)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(photo.caption ?? (appState.selectedLanguage == .vi ? "Ảnh chụp tại điểm tham quan" : "Captured at POI"))
-                                        .font(.headline)
-                                        .lineLimit(2)
-
-                                    HStack(spacing: 12) {
-                                        Label("\(photo.likesCount)", systemImage: "heart.fill")
-                                            .font(.caption)
-                                            .foregroundStyle(.pink)
-
-                                        if let azimuth = photo.azimuthDegrees {
-                                            Label("\(Int(azimuth))°", systemImage: "safari")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-
-                                    Text(photo.createdAt)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-
-                                Button(role: .destructive) {
-                                    Task {
-                                        deletingPhotoId = photo.id
-                                        do {
-                                            try await appState.deleteOwnPhoto(photo)
-                                        } catch {
-                                            errorMessage = error.localizedDescription
-                                        }
-                                        deletingPhotoId = nil
-                                    }
-                                } label: {
-                                    if deletingPhotoId == photo.id {
-                                        ProgressView()
-                                    } else {
-                                        Image(systemName: "trash")
-                                    }
-                                }
-                                .buttonStyle(.borderless)
                             }
-                            .padding(.vertical, 4)
+                            .frame(width: 84, height: 84)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(photo.caption ?? (appState.selectedLanguage == .vi ? "Ảnh chụp tại điểm tham quan" : "Captured at POI"))
+                                    .font(.headline)
+                                    .lineLimit(2)
+
+                                HStack(spacing: 12) {
+                                    Label("\(photo.likesCount)", systemImage: "heart.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.pink)
+
+                                    if let azimuth = photo.azimuthDegrees {
+                                        Label("\(Int(azimuth))°", systemImage: "safari")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Text(photo.createdAt)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button(role: .destructive) {
+                                Task {
+                                    deletingPhotoId = photo.id
+                                    do {
+                                        try await appState.deleteOwnPhoto(photo)
+                                    } catch {
+                                        errorMessage = error.localizedDescription
+                                    }
+                                    deletingPhotoId = nil
+                                }
+                            } label: {
+                                if deletingPhotoId == photo.id {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "trash")
+                                }
+                            }
+                            .buttonStyle(.borderless)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
             }
-            .navigationTitle(appState.selectedLanguage == .vi ? "Ảnh Đã Chia Sẻ" : "My Shared Photos")
-            .alert(
-                appState.selectedLanguage == .vi ? "Thông báo" : "Notice",
-                isPresented: Binding(
-                    get: { errorMessage != nil },
-                    set: { if !$0 { errorMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+        }
+        .navigationTitle(appState.selectedLanguage == .vi ? "Ảnh Đã Chia Sẻ" : "My Shared Photos")
+        .alert(
+            appState.selectedLanguage == .vi ? "Thông báo" : "Notice",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 }
 
-// MARK: - Profile & Language Switcher View
+// MARK: - Tab 4: Thông tin (Info, Profile, My Photos & Admin Console Entry)
 
 public struct ProfileSettingsView: View {
     @EnvironmentObject private var appState: AppState
@@ -368,6 +694,31 @@ public struct ProfileSettingsView: View {
                                 }
                             }
                             .disabled(editedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        NavigationLink {
+                            MyPhotosView()
+                                .environmentObject(appState)
+                        } label: {
+                            Label(
+                                appState.selectedLanguage == .vi ? "Quản lý ảnh đã chia sẻ của tôi" : "Manage My Shared Photos",
+                                systemImage: "photo.on.rectangle.angled"
+                            )
+                        }
+
+                        if user.role.isAdminOrAbove {
+                            NavigationLink {
+                                AdminModerationConsoleView()
+                                    .environmentObject(appState)
+                            } label: {
+                                Label(
+                                    user.role.isSuperAdmin
+                                        ? (appState.selectedLanguage == .vi ? "Bảng Chủ Quản (SuperAdmin) - Duyệt Pin & Ảnh" : "SuperAdmin Approval & Moderation")
+                                        : (appState.selectedLanguage == .vi ? "Bảng Quản Trị Viên (Admin) - Quản lý Pin & Ảnh" : "Admin POI & Photo Console"),
+                                    systemImage: "checkmark.shield.fill"
+                                )
+                                .foregroundStyle(.purple)
+                            }
                         }
                     }
                 }
@@ -437,7 +788,7 @@ public struct ProfileSettingsView: View {
                     }
                 }
             }
-            .navigationTitle(appState.selectedLanguage == .vi ? "Tài khoản & Cài đặt" : "Profile & Settings")
+            .navigationTitle(appState.selectedLanguage == .vi ? "Thông Tin" : "Information")
             .onAppear {
                 if let user = appState.currentUser, editedDisplayName.isEmpty {
                     editedDisplayName = user.displayName
