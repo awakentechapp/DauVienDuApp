@@ -15,6 +15,17 @@ public final class LocationManager: NSObject, ObservableObject {
 
     private let clManager = CLLocationManager()
 
+    public var hasFreshLocationFix: Bool {
+        guard let currentLocation else { return false }
+        let age = Date().timeIntervalSince(currentLocation.timestamp)
+        return age >= 0 && age <= 30 && currentLocation.horizontalAccuracy >= 0 && currentLocation.horizontalAccuracy <= 50
+    }
+
+    public var horizontalAccuracyMeters: Double? {
+        guard let currentLocation, currentLocation.horizontalAccuracy >= 0 else { return nil }
+        return currentLocation.horizontalAccuracy
+    }
+
     public override init() {
         super.init()
         clManager.delegate = self
@@ -41,6 +52,20 @@ public final class LocationManager: NSObject, ObservableObject {
         clManager.startUpdatingLocation()
         if CLLocationManager.headingAvailable() {
             clManager.startUpdatingHeading()
+        }
+    }
+
+    public func requestCurrentLocation() {
+        switch clManager.authorizationStatus {
+        case .notDetermined:
+            clManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            clManager.requestLocation()
+            startUpdating()
+        case .denied, .restricted:
+            locationError = "Vui lòng cấp quyền Vị trí (GPS) trong Cài đặt để ghi tọa độ POI."
+        @unknown default:
+            break
         }
     }
 

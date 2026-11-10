@@ -35,6 +35,7 @@ services:
       ASPNETCORE_URLS: "http://127.0.0.1:8080"
       ConnectionStrings__DefaultConnection: "Host=127.0.0.1;Port=5432;Database=${POSTGRES_DB:-awkdvd};Username=${POSTGRES_USER:-awkdvd};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Database__ApplyMigrationsAndSeedOnStartup: "true"
+      Routing__BaseUrl: "${ROUTING_BASE_URL:-http://127.0.0.1:5000/}"
       BootstrapAdmin__Email: "${BOOTSTRAP_ADMIN_EMAIL:-}"
       BootstrapAdmin__Password: "${BOOTSTRAP_ADMIN_PASSWORD:-}"
       Jwt__Issuer: "${JWT_ISSUER:-SightseeingTravel.Api}"
@@ -47,3 +48,26 @@ services:
       ContaboStorage__AccessKey: "${CONTABO_S3_ACCESS_KEY:-CONTABO_S3_ACCESS_KEY}"
       ContaboStorage__SecretKey: "${CONTABO_S3_SECRET_KEY:-CONTABO_S3_SECRET_KEY}"
       ContaboStorage__ForcePathStyle: "true"
+
+  routing:
+    profiles: ["routing"]
+    image: ghcr.io/project-osrm/osrm-backend:v26.10.0-debian
+    container_name: dauviendu-routing
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DISABLE_ACCESS_LOGGING: "true"
+    volumes:
+      - /opt/dauviendu-routing:/data:ro
+    command:
+      - osrm-routed
+      - --algorithm
+      - mld
+      - --threads
+      - "2"
+      - --ip
+      - 127.0.0.1
+      - --port
+      - "5000"
+      - --mmap=on
+      - /data/vietnam-latest.osrm

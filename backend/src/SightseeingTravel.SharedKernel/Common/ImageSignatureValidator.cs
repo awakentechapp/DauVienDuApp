@@ -17,13 +17,32 @@ public static class ImageSignatureValidator
                 ErrorType.Validation));
         }
 
-        Span<byte> header = stackalloc byte[12];
-        if (fileStream.CanSeek)
-            fileStream.Position = 0;
+        if (!fileStream.CanSeek)
+        {
+            return Result.Failure<string>(new Error(
+                ErrorCodes.PhotoInvalidFormatOrSize,
+                "Image stream must support seeking so its contents can be validated without consuming the upload.",
+                ErrorType.Validation));
+        }
 
-        var bytesRead = fileStream.Read(header);
-        if (fileStream.CanSeek)
+        Span<byte> header = stackalloc byte[12];
+        fileStream.Position = 0;
+
+        var bytesRead = 0;
+        try
+        {
+            while (bytesRead < header.Length)
+            {
+                var read = fileStream.Read(header[bytesRead..]);
+                if (read == 0)
+                    break;
+                bytesRead += read;
+            }
+        }
+        finally
+        {
             fileStream.Position = 0;
+        }
 
         if (bytesRead < 4)
         {

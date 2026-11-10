@@ -35,7 +35,8 @@ public struct SightseeingMapScreen: View {
                             toLatitude: poi.latitude,
                             longitude: poi.longitude
                         )
-                        let isUnlocked = poi.isWithinGeofence(userDistanceMeters: liveDist)
+                        let isUnlocked = locationManager.hasFreshLocationFix &&
+                            liveDist <= (poi.activationRadiusMeters + 20.0)
 
                         Annotation(
                             poi.name,
@@ -234,7 +235,8 @@ public struct SightseeingMapScreen: View {
                                 toLatitude: poi.latitude,
                                 longitude: poi.longitude
                             )
-                            let isUnlocked = poi.isWithinGeofence(userDistanceMeters: liveDist)
+                            let isUnlocked = locationManager.hasFreshLocationFix &&
+                                liveDist <= (poi.activationRadiusMeters + 20.0)
 
                             NearbyPoiCarouselCard(
                                 poi: poi,

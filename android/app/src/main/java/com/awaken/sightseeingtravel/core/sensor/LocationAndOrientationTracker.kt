@@ -23,10 +23,18 @@ data class DeviceSpatialPose(
     val altitudeMeters: Double = 5.0,
     val accuracyMeters: Float = 12.0f,
     val hasLiveGpsFix: Boolean = false,
+    val locationFixTimeMillis: Long = 0L,
+    val isSimulatedLocation: Boolean = false,
     val azimuthDegrees: Float = 0f, // 0..360 (0=N, 90=E, 180=S, 270=W)
     val pitchDegrees: Float = 0f,   // Up/Down camera tilt (-90..+90)
     val rollDegrees: Float = 0f
 ) {
+    val hasFreshGpsFix: Boolean
+        get() {
+            val ageMillis = System.currentTimeMillis() - locationFixTimeMillis
+            return hasLiveGpsFix && ageMillis in 0L..30_000L
+        }
+
     companion object {
         // Default initial coordinates: Notre-Dame Cathedral / Central Post Office Saigon
         const val DEFAULT_HO_CHI_MINH_LAT = 10.779785
@@ -66,7 +74,9 @@ class LocationAndOrientationTracker(context: Context) : SensorEventListener {
                 longitude = loc.longitude,
                 altitudeMeters = if (loc.hasAltitude()) loc.altitude else 5.0,
                 accuracyMeters = if (loc.hasAccuracy()) loc.accuracy else 10.0f,
-                hasLiveGpsFix = true
+                hasLiveGpsFix = true,
+                locationFixTimeMillis = loc.time,
+                isSimulatedLocation = false
             )
         }
     }
@@ -122,6 +132,8 @@ class LocationAndOrientationTracker(context: Context) : SensorEventListener {
             latitude = latitude,
             longitude = longitude,
             hasLiveGpsFix = true,
+            locationFixTimeMillis = System.currentTimeMillis(),
+            isSimulatedLocation = true,
             azimuthDegrees = azimuthDegrees ?: _spatialPose.value.azimuthDegrees
         )
     }

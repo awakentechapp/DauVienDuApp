@@ -45,15 +45,7 @@ public final class AppState: ObservableObject {
             )
             applyAuthenticatedUser(response.user)
         } catch {
-            if trimmed.lowercased() == "testapp" && password == "TestApp123456" {
-                applyAuthenticatedUser(UserProfileDto(id: "usr-testapp", email: "testapp", displayName: "Du Khách Kiểm Thử (testapp)", avatarUrl: nil, role: .tourist, preferredLanguage: selectedLanguage.rawValue))
-            } else if trimmed.lowercased() == "testadmin" && password == "TestApp123456" {
-                applyAuthenticatedUser(UserProfileDto(id: "usr-testadmin", email: "testadmin", displayName: "Quản Trị Viên (testadmin)", avatarUrl: nil, role: .admin, preferredLanguage: selectedLanguage.rawValue))
-            } else if trimmed.lowercased() == "sa" && password == "AwakenTech150520#" {
-                applyAuthenticatedUser(UserProfileDto(id: "usr-sa", email: "sa", displayName: "Chủ Quản Hệ Thống (sa)", avatarUrl: nil, role: .superAdmin, preferredLanguage: selectedLanguage.rawValue))
-            } else {
-                authErrorMessage = error.localizedDescription
-            }
+            authErrorMessage = error.localizedDescription
         }
     }
 

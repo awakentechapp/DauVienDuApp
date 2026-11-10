@@ -26,6 +26,9 @@ public static class GeoCalculator
         var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
                 Math.Cos(radLat1) * Math.Cos(radLat2) *
                 Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        // Floating-point rounding can push the Haversine intermediate slightly outside [0, 1]
+        // for antipodal or nearly antipodal points, making the square root below NaN.
+        a = Math.Clamp(a, 0.0, 1.0);
 
         var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
         return Math.Round(EarthRadiusMeters * c, 2);
@@ -56,15 +59,37 @@ public static class GeoCalculator
         double radiusKm)
     {
         var radiusMeters = Math.Max(radiusKm, 0.1) * 1000.0;
-        var latDelta = RadiansToDegrees(radiusMeters / EarthRadiusMeters);
-        var cosLat = Math.Max(Math.Cos(DegreesToRadians(centerLat)), 0.0001);
-        var lngDelta = RadiansToDegrees(radiusMeters / (EarthRadiusMeters * cosLat));
+        var angularRadius = radiusMeters / EarthRadiusMeters;
+        var centerLatRadians = DegreesToRadians(centerLat);
+        var minLatRadians = Math.Max(centerLatRadians - angularRadius, -Math.PI / 2.0);
+        var maxLatRadians = Math.Min(centerLatRadians + angularRadius, Math.PI / 2.0);
+
+        // A search circle that reaches either pole spans every longitude. Away from the poles,
+        // the spherical-cap bound avoids missing nearby points at high latitudes.
+        var reachesPole = minLatRadians <= -Math.PI / 2.0 || maxLatRadians >= Math.PI / 2.0;
+        if (reachesPole || angularRadius >= Math.PI)
+        {
+            return (
+                RadiansToDegrees(minLatRadians),
+                RadiansToDegrees(maxLatRadians),
+                -180.0,
+                180.0);
+        }
+
+        var longitudeRatio = Math.Sin(angularRadius) / Math.Cos(centerLatRadians);
+        var lngDelta = RadiansToDegrees(Math.Asin(Math.Clamp(longitudeRatio, -1.0, 1.0)));
+        var minLng = centerLng - lngDelta;
+        var maxLng = centerLng + lngDelta;
+        if (minLng < -180.0)
+            minLng += 360.0;
+        if (maxLng > 180.0)
+            maxLng -= 360.0;
 
         return (
-            Math.Clamp(centerLat - latDelta, -90.0, 90.0),
-            Math.Clamp(centerLat + latDelta, -90.0, 90.0),
-            Math.Clamp(centerLng - lngDelta, -180.0, 180.0),
-            Math.Clamp(centerLng + lngDelta, -180.0, 180.0)
+            RadiansToDegrees(minLatRadians),
+            RadiansToDegrees(maxLatRadians),
+            minLng,
+            maxLng
         );
     }
 

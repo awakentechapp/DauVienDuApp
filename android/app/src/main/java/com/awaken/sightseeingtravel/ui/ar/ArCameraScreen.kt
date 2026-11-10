@@ -44,9 +44,9 @@ import com.awaken.sightseeingtravel.core.model.CommunityPhotoDto
 import com.awaken.sightseeingtravel.core.model.PoiArContextDto
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
-import com.google.ar.core.ArCoreApk
 import java.io.File
 import kotlin.math.atan2
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -57,8 +57,8 @@ private const val VERTICAL_FOV_DEGREES = 48f
 /**
  * Spatial AR Camera Screen combining:
  * 1. CameraX Live Camera Preview + High-Res Photo Capture (`ImageCapture`)
- * 2. ARCore availability detection + Sensor 3D Orientation Projection (`TYPE_ROTATION_VECTOR`)
- * 3. Floating 360° Spatial AR Cultural Info Cards (`arInfoCards`)
+ * 2. Live Sensor 3D Orientation Projection (`TYPE_ROTATION_VECTOR`) gated by a fresh GPS geofence
+ * 3. Directionally anchored AR Info Cards, shown only when the camera aligns with their saved bearing
  * 4. Floating Top 10 Highlighted Community Photos (`highlightedCommunityPhotos`) anchored around the POI
  * 5. Tap-to-inspect modal dialogs + Direct Photo Capture & Upload to Contabo Object Storage via Backend API
  */
@@ -80,7 +80,6 @@ fun ArCameraScreen(
     val isEn = selectedLanguage.equals("en", ignoreCase = true)
 
     var viewportSize by remember { mutableStateOf(IntSize(1080, 1920)) }
-    var manualAzimuthOffset by remember { mutableFloatStateOf(0f) }
     var selectedArCard by remember { mutableStateOf<ArInfoCardDto?>(null) }
     var selectedCommunityPhoto by remember { mutableStateOf<CommunityPhotoDto?>(null) }
     var showCaptureDialog by remember { mutableStateOf(false) }
@@ -95,18 +94,29 @@ fun ArCameraScreen(
             .build()
     }
 
-    val arCoreStatusLabel = remember(context) {
-        try {
-            val availability = ArCoreApk.getInstance().checkAvailability(context)
-            if (availability.isSupported) "ARCore + 6DoF IMU Active" else "360° IMU Spatial Fusion Active"
-        } catch (_: Exception) {
-            "360° IMU Spatial Fusion Active"
-        }
+    val effectiveAzimuth = (spatialPose.azimuthDegrees + 360f) % 360f
+    val hasUsableGps = spatialPose.hasFreshGpsFix &&
+        !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f
+    val distanceToPoiMeters = LocationAndOrientationTracker.calculateDistanceMeters(
+        spatialPose.latitude,
+        spatialPose.longitude,
+        arContext.latitude,
+        arContext.longitude
+    )
+    val isWithinPoiZone = hasUsableGps &&
+        distanceToPoiMeters <= arContext.activationRadiusMeters + 20.0
+    val top10Photos = remember(arContext.highlightedCommunityPhotos) {
+        arContext.highlightedCommunityPhotos.filter { it.azimuthDegrees != null }.take(10)
     }
 
-    val effectiveAzimuth = (spatialPose.azimuthDegrees + manualAzimuthOffset + 360f) % 360f
-    val top10Photos = remember(arContext.highlightedCommunityPhotos) {
-        arContext.highlightedCommunityPhotos.take(10)
+    LaunchedEffect(isWithinPoiZone) {
+        if (!isWithinPoiZone) {
+            selectedArCard = null
+            selectedCommunityPhoto = null
+            showCaptureDialog = false
+            pendingCapturedFile?.delete()
+            pendingCapturedFile = null
+        }
     }
 
     Box(
@@ -160,7 +170,7 @@ fun ArCameraScreen(
         )
 
         // 2. 3D Projected Spatial AR Cultural Info Cards (`arInfoCards`)
-        arContext.arInfoCards.forEach { card ->
+        if (isWithinPoiZone) arContext.arInfoCards.forEach { card ->
             val projection = projectSpatialAnchorToScreen(
                 viewerAzimuthDeg = effectiveAzimuth,
                 viewerPitchDeg = spatialPose.pitchDegrees,
@@ -170,7 +180,11 @@ fun ArCameraScreen(
                 viewportWidthPx = viewportSize.width,
                 viewportHeightPx = viewportSize.height
             )
-            if (projection.isVisibleInFrustum) {
+            val headingError = abs(
+                LocationAndOrientationTracker.signedAngleDeltaDegrees(effectiveAzimuth, card.azimuthDegrees)
+            )
+            val verticalAlignment = abs(projection.screenYPx / viewportSize.height - 0.5f) <= 0.22f
+            if (projection.isVisibleInFrustum && headingError <= 12f && verticalAlignment) {
                 SpatialArInfoCardOverlay(
                     card = card,
                     screenX = projection.screenXPx,
@@ -181,12 +195,8 @@ fun ArCameraScreen(
         }
 
         // 3. 3D Projected Top 10 Highlighted Community Photos (`highlightedCommunityPhotos`)
-        top10Photos.forEachIndexed { index, photo ->
-            val photoAzimuth = if (photo.azimuthDegrees == 0f && index > 0) {
-                (index * 36f) % 360f
-            } else {
-                photo.azimuthDegrees
-            }
+        if (isWithinPoiZone) top10Photos.forEachIndexed { index, photo ->
+            val photoAzimuth = photo.azimuthDegrees ?: return@forEachIndexed
             val projection = projectSpatialAnchorToScreen(
                 viewerAzimuthDeg = effectiveAzimuth,
                 viewerPitchDeg = spatialPose.pitchDegrees,
@@ -196,7 +206,11 @@ fun ArCameraScreen(
                 viewportWidthPx = viewportSize.width,
                 viewportHeightPx = viewportSize.height
             )
-            if (projection.isVisibleInFrustum) {
+            val headingError = abs(
+                LocationAndOrientationTracker.signedAngleDeltaDegrees(effectiveAzimuth, photoAzimuth)
+            )
+            val verticalAlignment = abs(projection.screenYPx / viewportSize.height - 0.5f) <= 0.22f
+            if (projection.isVisibleInFrustum && headingError <= 12f && verticalAlignment) {
                 SpatialCommunityPhotoBillboard(
                     photo = photo,
                     rank = photo.highlightRank ?: (index + 1),
@@ -235,7 +249,11 @@ fun ArCameraScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "$arCoreStatusLabel • Heading ${effectiveAzimuth.roundToInt()}° • ${arContext.arInfoCards.size} AR Cards • Top ${top10Photos.size} Photos",
+                                text = if (isEn) {
+                                    "${if (isWithinPoiZone) "GPS ${distanceToPoiMeters.roundToInt()}m" else "GPS unavailable/outside zone"} • Heading ${effectiveAzimuth.roundToInt()}° • ${arContext.arInfoCards.size} Cards • Top ${top10Photos.size} Photos"
+                                } else {
+                                    "${if (isWithinPoiZone) "GPS ${distanceToPoiMeters.roundToInt()}m" else "Chưa có GPS/ngoài vùng"} • Hướng ${effectiveAzimuth.roundToInt()}° • ${arContext.arInfoCards.size} thẻ • ${top10Photos.size} ảnh"
+                                },
                                 color = Color(0xFF38BDF8),
                                 fontSize = 11.sp
                             )
@@ -248,8 +266,8 @@ fun ArCameraScreen(
                 // 360° Spatial Radar Mini-Map
                 SpatialRadarHud(
                     viewerAzimuth = effectiveAzimuth,
-                    arCards = arContext.arInfoCards,
-                    topPhotos = top10Photos
+                    arCards = if (isWithinPoiZone) arContext.arInfoCards else emptyList(),
+                    topPhotos = if (isWithinPoiZone) top10Photos else emptyList()
                 )
 
                 Spacer(modifier = Modifier.width(10.dp))
@@ -269,7 +287,7 @@ fun ArCameraScreen(
             }
         }
 
-        // 5. Bottom Controls: 360° Look-Around Slider + Photo Capture Shutter Button
+        // 5. Bottom Controls: live GPS / compass guidance + on-site photo capture
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -284,37 +302,17 @@ fun ArCameraScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (isEn) {
-                                "Rotate phone or pan 360° to view AR Cards & Top 10 Photos"
-                            } else {
-                                "Xoay điện thoại hoặc kéo thanh 360° để xem Thẻ AR & Top 10 Ảnh"
-                            },
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = "${effectiveAzimuth.roundToInt()}°",
-                            color = Color(0xFFFACC15),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    }
-
-                    Slider(
-                        value = manualAzimuthOffset,
-                        onValueChange = { manualAzimuthOffset = it },
-                        valueRange = 0f..360f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFF38BDF8),
-                            activeTrackColor = Color(0xFF38BDF8)
-                        )
+                    Text(
+                        text = when {
+                            !hasUsableGps -> if (isEn) "Waiting for an accurate live GPS fix…" else "Đang chờ tín hiệu GPS thực đủ chính xác…"
+                            !isWithinPoiZone -> if (isEn) "Move within ${ (arContext.activationRadiusMeters + 20).roundToInt() }m of this POI to scan its AR anchors." else "Hãy đến trong phạm vi ${(arContext.activationRadiusMeters + 20).roundToInt()}m để quét các điểm AR đã ghim."
+                            else -> if (isEn) "Point the camera at a saved direction; the AR card appears when aligned." else "Hướng camera vào góc đã ghim; thẻ AR sẽ hiện khi căn đúng hướng."
+                        },
+                        color = if (isWithinPoiZone) Color(0xFF7DD3FC) else Color(0xFFFACC15),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -322,11 +320,7 @@ fun ArCameraScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (isEn) {
-                                "Tap any floating card or photo in space to inspect"
-                            } else {
-                                "Chạm vào thẻ văn hóa hoặc ảnh nổi bật để xem chi tiết"
-                            },
+                            text = if (isEn) "Turn the phone to scan the pinned direction" else "Xoay điện thoại để quét đúng hướng đã ghim",
                             color = Color(0xFF94A3B8),
                             fontSize = 11.sp,
                             modifier = Modifier.weight(1f)
@@ -344,7 +338,7 @@ fun ArCameraScreen(
                                     }
                                 )
                             },
-                            enabled = !isUploadingPhoto,
+                            enabled = !isUploadingPhoto && isWithinPoiZone,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
                             shape = RoundedCornerShape(24.dp)
                         ) {
@@ -463,7 +457,7 @@ fun ArCameraScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "By ${photo.authorDisplayName} • ${photo.createdAt} • Azimuth ${photo.azimuthDegrees.toInt()}°",
+                        text = "By ${photo.authorDisplayName} • ${photo.createdAt} • Azimuth ${photo.azimuthDegrees?.toInt() ?: "—"}°",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -855,9 +849,9 @@ private fun SpatialRadarHud(
         }
 
         // Top 10 Highlighted Community Photos (Gold dots)
-        topPhotos.forEachIndexed { idx, photo ->
-            val photoAz = if (photo.azimuthDegrees == 0f && idx > 0) (idx * 36f) % 360f else photo.azimuthDegrees
-            val relDeg = LocationAndOrientationTracker.signedAngleDeltaDegrees(viewerAzimuth, photoAz)
+        topPhotos.forEach { photo ->
+            val photoAzimuth = photo.azimuthDegrees ?: return@forEach
+            val relDeg = LocationAndOrientationTracker.signedAngleDeltaDegrees(viewerAzimuth, photoAzimuth)
             val rad = Math.toRadians((relDeg - 90f).toDouble())
             val dotX = center.x + (cos(rad) * radius * 0.72f).toFloat()
             val dotY = center.y + (sin(rad) * radius * 0.72f).toFloat()

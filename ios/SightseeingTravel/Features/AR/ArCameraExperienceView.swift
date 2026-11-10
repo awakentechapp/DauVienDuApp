@@ -33,19 +33,36 @@ public struct ArCameraExperienceView: View {
         self.poi = poi
     }
 
+    private var distanceToPoiMeters: Double {
+        locationManager.distanceInMeters(toLatitude: poi.latitude, longitude: poi.longitude)
+    }
+
+    private var isWithinPoiZone: Bool {
+        locationManager.hasFreshLocationFix &&
+        locationManager.isWithinPoiGeofence(
+            poiLatitude: poi.latitude,
+            poiLongitude: poi.longitude,
+            activationRadiusMeters: poi.activationRadiusMeters
+        )
+    }
+
     public var body: some View {
         ZStack {
             // Live ARKit SceneKit View (.gravityAndHeading)
             ArSceneKitContainerView(
-                arInfoCards: arContext?.arInfoCards ?? [],
-                highlightedPhotos: Array((arContext?.highlightedCommunityPhotos ?? []).prefix(10)),
+                arInfoCards: isWithinPoiZone ? (arContext?.arInfoCards ?? []) : [],
+                highlightedPhotos: isWithinPoiZone
+                    ? Array((arContext?.highlightedCommunityPhotos ?? []).filter { $0.azimuthDegrees != nil }.prefix(10))
+                    : [],
                 triggerSnapshotRequest: $triggerSnapshotRequest,
                 onNodeTapped: { tappedItem in
+                    guard isWithinPoiZone else { return }
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         selectedItem = tappedItem
                     }
                 },
                 onSnapshotCaptured: { image in
+                    guard isWithinPoiZone else { return }
                     capturedSnapshot = image
                     showPhotoUploadSheet = true
                 }
@@ -57,6 +74,20 @@ public struct ArCameraExperienceView: View {
                 topArHudBar
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
+
+                HStack(spacing: 8) {
+                    Image(systemName: isWithinPoiZone ? "scope" : "location.slash.fill")
+                        .foregroundStyle(isWithinPoiZone ? .green : .yellow)
+                    Text(gpsZoneStatus)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(Color.black.opacity(0.65))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
 
                 if isLoading {
                     HStack(spacing: 10) {
@@ -93,7 +124,7 @@ public struct ArCameraExperienceView: View {
                 Spacer()
 
                 // Selected 3D Node Detail Overlay Card (Story or Community Photo)
-                if let item = selectedItem {
+                if isWithinPoiZone, let item = selectedItem {
                     selectedNodeOverlayCard(item)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
@@ -106,8 +137,27 @@ public struct ArCameraExperienceView: View {
                     .padding(.bottom, 16)
             }
         }
-        .task(id: appState.selectedLanguage) {
+        .task(id: "\(appState.selectedLanguage.rawValue)-\(isWithinPoiZone)") {
+            guard isWithinPoiZone else {
+                isLoading = false
+                arContext = nil
+                selectedItem = nil
+                errorMessage = nil
+                return
+            }
             await loadArContext()
+        }
+        .onReceive(locationManager.$currentLocation) { _ in
+            if !isWithinPoiZone {
+                selectedItem = nil
+                showPhotoUploadSheet = false
+            }
+        }
+        .onChange(of: isWithinPoiZone) { isInside in
+            if !isInside {
+                selectedItem = nil
+                showPhotoUploadSheet = false
+            }
         }
         .sheet(isPresented: $showPhotoUploadSheet) {
             OnSitePhotoUploadSheet(
@@ -328,6 +378,22 @@ public struct ArCameraExperienceView: View {
         }
     }
 
+    private var gpsZoneStatus: String {
+        if !locationManager.hasFreshLocationFix {
+            return appState.selectedLanguage == .vi
+                ? "Đang chờ GPS thực có độ chính xác phù hợp…"
+                : "Waiting for an accurate live GPS fix…"
+        }
+        if isWithinPoiZone {
+            return appState.selectedLanguage == .vi
+                ? "Đang ở đúng khu vực POI. Hướng camera vào vị trí AR đã ghim để hiện thông tin."
+                : "Inside the POI area. Point the camera at a pinned AR position to reveal its information."
+        }
+        return appState.selectedLanguage == .vi
+            ? "Bạn đang cách POI \(Int(distanceToPoiMeters.rounded()))m; hãy đến trong bán kính \(Int(poi.activationRadiusMeters + 20))m để quét AR."
+            : "You are \(Int(distanceToPoiMeters.rounded()))m from this POI; move within \(Int(poi.activationRadiusMeters + 20))m to scan AR."
+    }
+
     // MARK: - Bottom Control Bar
 
     private var bottomArControlBar: some View {
@@ -350,6 +416,7 @@ public struct ArCameraExperienceView: View {
 
             // Integrated Capture & Share Photo at POI Button
             Button {
+                guard isWithinPoiZone else { return }
                 triggerSnapshotRequest = true
             } label: {
                 HStack(spacing: 8) {
@@ -375,12 +442,18 @@ public struct ArCameraExperienceView: View {
                 .clipShape(Capsule())
                 .shadow(color: .teal.opacity(0.5), radius: 8, y: 4)
             }
+            .disabled(!isWithinPoiZone)
+            .opacity(isWithinPoiZone ? 1 : 0.5)
         }
     }
 
     // MARK: - Load AR Context from Backend
 
     private func loadArContext() async {
+        guard isWithinPoiZone else {
+            arContext = nil
+            return
+        }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -536,8 +609,7 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
                 let nodeName = "ar_item_photo_\(photo.id)"
                 nodeMap[nodeName] = .communityPhoto(photo)
 
-                let fallbackAzimuth = Double(index) * (360.0 / Double(max(1, highlightedPhotos.count))) + 18.0
-                let azimuth = photo.azimuthDegrees ?? fallbackAzimuth
+                guard let azimuth = photo.azimuthDegrees else { continue }
                 let distance: Double = 3.4
                 let elevation: Double = (index % 2 == 0) ? 0.55 : -0.25
 

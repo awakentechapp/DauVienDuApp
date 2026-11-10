@@ -38,7 +38,7 @@ interface SightseeingApiService {
     suspend fun refreshToken(@Body request: RefreshTokenRequest): ApiEnvelope<AuthTokensResponse>
 
     @POST("api/v1/auth/logout")
-    suspend fun logout(@Body request: LogoutRequest): ApiEnvelope<Unit>
+    suspend fun logout(@Body request: LogoutRequest): retrofit2.Response<ResponseBody>
 
     @GET("api/v1/users/me")
     suspend fun getMyProfile(): ApiEnvelope<UserProfileDto>
@@ -73,6 +73,11 @@ interface SightseeingApiService {
         @Query("lng") longitude: Double,
         @Query("lang") language: String = "vi"
     ): ApiEnvelope<PoiArContextDto>
+
+    @POST("api/v1/navigation/route")
+    suspend fun calculateRoute(
+        @Body request: CalculateRouteRequestDto
+    ): ApiEnvelope<CalculatedRouteDto>
 
     // ------------------------------------------------------------------------
     // Community Photos (Contabo Object Storage via Backend Multipart API)
@@ -111,7 +116,7 @@ interface SightseeingApiService {
     @DELETE("api/v1/photos/{photoId}")
     suspend fun deleteOwnPhoto(
         @Path("photoId") photoId: String
-    ): ApiEnvelope<DeletePhotoResponseDto>
+    ): retrofit2.Response<ResponseBody>
 
     // ------------------------------------------------------------------------
     // Admin & SuperAdmin POI Management, Approval & Photo Moderation
@@ -133,13 +138,23 @@ interface SightseeingApiService {
         @Body request: CreateOrUpdatePoiRequest
     ): ApiEnvelope<AdminPoiDto>
 
+    @GET("api/v1/admin/pois/{poiId}/ar-cards")
+    suspend fun getAdminArInfoCards(
+        @Path("poiId") poiId: String
+    ): ApiEnvelope<List<AdminArInfoCardDto>>
+
+    @POST("api/v1/admin/pois/{poiId}/ar-cards")
+    suspend fun createArInfoCard(
+        @Path("poiId") poiId: String,
+        @Body request: UpsertArInfoCardRequest
+    ): retrofit2.Response<ResponseBody>
+
     /**
      * SuperAdmin ONLY: Approves a `PendingApproval` POI and sets status to `Published`
      */
     @POST("api/v1/admin/pois/{poiId}/approve")
     suspend fun approvePoi(
-        @Path("poiId") poiId: String,
-        @Body request: ApprovePoiRequest = ApprovePoiRequest()
+        @Path("poiId") poiId: String
     ): ApiEnvelope<AdminPoiDto>
 
     /**
@@ -179,16 +194,21 @@ object SightseeingNetworkModule {
 
     fun createApiService(tokenStore: TokenStore): SightseeingApiService {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
+            redactHeader("Authorization")
+            redactHeader("Cookie")
+            redactHeader("Set-Cookie")
             level = if (BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.BODY
+                // Request bodies contain login/register passwords and must never reach Logcat.
+                HttpLoggingInterceptor.Level.HEADERS
             } else {
                 HttpLoggingInterceptor.Level.BASIC
             }
         }
 
+        val gson = ApiResponseAdapters.createGson()
         val refreshRetrofit = Retrofit.Builder()
             .baseUrl(BuildConfig.API_BASE_URL)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
         val syncRefreshApi = refreshRetrofit.create(SyncTokenRefreshApi::class.java)
 
@@ -242,7 +262,7 @@ object SightseeingNetworkModule {
         return Retrofit.Builder()
             .baseUrl(BuildConfig.API_BASE_URL)
             .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
             .create(SightseeingApiService::class.java)
     }

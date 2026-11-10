@@ -17,19 +17,24 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.awaken.sightseeingtravel.core.model.PoiPinSummaryDto
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
+import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
+import com.awaken.sightseeingtravel.ui.ActiveNavigationRoute
 import com.google.gson.JsonObject
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.PropertyFactory.*
+import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import kotlin.math.abs
 
@@ -50,6 +55,9 @@ fun OpenFreeMapComposeView(
     pois: List<PoiPinSummaryDto>,
     selectedPoiId: String?,
     recenterTrigger: Int,
+    focusedPoiId: String?,
+    focusTrigger: Int,
+    navigationRoute: ActiveNavigationRoute?,
     onPoiMarkerClick: (PoiPinSummaryDto) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -72,6 +80,7 @@ fun OpenFreeMapComposeView(
     var hasCenteredInitially by remember { mutableStateOf(false) }
 
     val currentPois by rememberUpdatedState(pois)
+    val currentNavigationRoute by rememberUpdatedState(navigationRoute)
     val currentOnPoiClick by rememberUpdatedState(onPoiMarkerClick)
 
     // Bind MapView lifecycle to Compose LifecycleOwner
@@ -110,8 +119,47 @@ fun OpenFreeMapComposeView(
         }
     }
 
+    // Focus the requested POI even when it was selected from a list outside the map.
+    LaunchedEffect(focusTrigger, focusedPoiId, mapLibreInstance, isStyleReady) {
+        val map = mapLibreInstance ?: return@LaunchedEffect
+        if (!isStyleReady || focusedPoiId == null) return@LaunchedEffect
+        val focusedPoi = pois.firstOrNull { it.id == focusedPoiId } ?: return@LaunchedEffect
+
+        map.animateCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(LatLng(focusedPoi.latitude, focusedPoi.longitude))
+                    .zoom(15.5)
+                    .tilt(25.0)
+                    .build()
+            ),
+            750
+        )
+    }
+
+    LaunchedEffect(navigationRoute?.routeId, mapLibreInstance, isStyleReady) {
+        val route = navigationRoute ?: return@LaunchedEffect
+        val map = mapLibreInstance ?: return@LaunchedEffect
+        if (!isStyleReady || route.coordinates.isEmpty()) return@LaunchedEffect
+
+        val points = route.coordinates.map { LatLng(it.latitude, it.longitude) }
+        if (points.size >= 2) {
+            val boundsBuilder = LatLngBounds.Builder()
+            points.forEach { boundsBuilder.include(it) }
+            map.animateCamera(
+                CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 96),
+                850
+            )
+        } else {
+            map.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(points.first(), 15.0),
+                750
+            )
+        }
+    }
+
     // Update GeoJSON sources whenever POIs, selectedPOI, or GPS pose changes
-    LaunchedEffect(spatialPose.latitude, spatialPose.longitude, pois, selectedPoiId, isStyleReady) {
+    LaunchedEffect(spatialPose.latitude, spatialPose.longitude, pois, selectedPoiId, focusedPoiId, navigationRoute, isStyleReady) {
         val map = mapLibreInstance ?: return@LaunchedEffect
         val style = map.style ?: return@LaunchedEffect
         if (!isStyleReady) return@LaunchedEffect
@@ -120,15 +168,18 @@ fun OpenFreeMapComposeView(
             style = style,
             spatialPose = spatialPose,
             pois = pois,
-            selectedPoiId = selectedPoiId
+            selectedPoiId = selectedPoiId,
+            navigationRoute = navigationRoute
         )
 
         if (!hasCenteredInitially) {
             hasCenteredInitially = true
+            val focusedPoi = pois.firstOrNull { it.id == focusedPoiId }
             map.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
-                    LatLng(spatialPose.latitude, spatialPose.longitude),
-                    14.5
+                    focusedPoi?.let { LatLng(it.latitude, it.longitude) }
+                        ?: LatLng(spatialPose.latitude, spatialPose.longitude),
+                    if (focusedPoi != null) 15.5 else 14.5
                 ),
                 750
             )
@@ -151,7 +202,8 @@ fun OpenFreeMapComposeView(
                                 style = fallbackStyle,
                                 spatialPose = spatialPose,
                                 pois = currentPois,
-                                selectedPoiId = selectedPoiId
+                                selectedPoiId = selectedPoiId,
+                                navigationRoute = currentNavigationRoute
                             )
                         }
                     }
@@ -172,7 +224,8 @@ fun OpenFreeMapComposeView(
                                     style = style,
                                     spatialPose = spatialPose,
                                     pois = currentPois,
-                                    selectedPoiId = selectedPoiId
+                                    selectedPoiId = selectedPoiId,
+                                    navigationRoute = currentNavigationRoute
                                 )
                             }
                         )
@@ -218,6 +271,9 @@ private const val ICON_POI_LOCKED = "icon-poi-locked"
 private const val ICON_POI_FOOD = "icon-poi-food"
 private const val ICON_POI_UNLOCKED = "icon-poi-unlocked"
 private const val ICON_POI_SELECTED = "icon-poi-selected"
+
+private const val SOURCE_NAVIGATION_ROUTE = "source-navigation-route"
+private const val LAYER_NAVIGATION_ROUTE = "layer-navigation-route"
 
 private const val PROP_POI_ID = "poi_id"
 private const val PROP_POI_TITLE = "poi_title"
@@ -274,6 +330,19 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     style.addImage(ICON_POI_UNLOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#16A34A"), ringColor = Color.parseColor("#BBF7D0")))
     style.addImage(ICON_POI_SELECTED, createPoiPinBitmap(density, fillColor = Color.parseColor("#EA580C"), ringColor = Color.parseColor("#FEF08A")))
 
+    if (style.getSource(SOURCE_NAVIGATION_ROUTE) == null) {
+        style.addSource(GeoJsonSource(SOURCE_NAVIGATION_ROUTE))
+    }
+    if (style.getLayer(LAYER_NAVIGATION_ROUTE) == null) {
+        style.addLayer(
+            LineLayer(LAYER_NAVIGATION_ROUTE, SOURCE_NAVIGATION_ROUTE).withProperties(
+                lineColor(Color.parseColor("#2563EB")),
+                lineWidth(5.0f),
+                lineOpacity(0.9f)
+            )
+        )
+    }
+
     if (style.getSource(SOURCE_USER_GPS) == null) {
         style.addSource(GeoJsonSource(SOURCE_USER_GPS))
     }
@@ -311,8 +380,19 @@ private fun updateGeoJsonLayers(
     style: Style,
     spatialPose: DeviceSpatialPose,
     pois: List<PoiPinSummaryDto>,
-    selectedPoiId: String?
+    selectedPoiId: String?,
+    navigationRoute: ActiveNavigationRoute?
 ) {
+    val routeSource = style.getSourceAs<GeoJsonSource>(SOURCE_NAVIGATION_ROUTE)
+    val routePoints = navigationRoute?.coordinates.orEmpty().map {
+        Point.fromLngLat(it.longitude, it.latitude)
+    }
+    if (routePoints.size >= 2) {
+        routeSource?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(routePoints)))
+    } else {
+        routeSource?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+    }
+
     val gpsSource = style.getSourceAs<GeoJsonSource>(SOURCE_USER_GPS)
     gpsSource?.setGeoJson(
         Feature.fromGeometry(Point.fromLngLat(spatialPose.longitude, spatialPose.latitude))
@@ -320,7 +400,15 @@ private fun updateGeoJsonLayers(
 
     val poiSource = style.getSourceAs<GeoJsonSource>(SOURCE_POI_PINS)
     val features = pois.map { poi ->
-        val isUnlocked = poi.canUnlockAr(poi.distanceMeters)
+        val liveDistance = LocationAndOrientationTracker.calculateDistanceMeters(
+            spatialPose.latitude,
+            spatialPose.longitude,
+            poi.latitude,
+            poi.longitude
+        )
+        val hasFreshGps = spatialPose.hasFreshGpsFix &&
+            !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f
+        val isUnlocked = hasFreshGps && poi.canUnlockAr(liveDistance)
         val isFood = poi.category.contains("Ăn uống", ignoreCase = true) ||
             poi.category.contains("Food", ignoreCase = true) ||
             poi.category.contains("Ẩm thực", ignoreCase = true)

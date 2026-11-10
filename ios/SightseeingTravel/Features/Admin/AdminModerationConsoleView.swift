@@ -10,6 +10,7 @@ public struct AdminModerationConsoleView: View {
     @State private var reportedPhotos: [ReportedPhotoQueueItemDto] = []
     @State private var isLoading: Bool = false
     @State private var showCreatePoiSheet: Bool = false
+    @State private var poiForFixedArCard: AdminPoiDto?
     @State private var editingPoi: AdminPoiDto?
     @State private var rejectingPoi: AdminPoiDto?
     @State private var rejectionReasonInput: String = ""
@@ -106,8 +107,9 @@ public struct AdminModerationConsoleView: View {
             .sheet(isPresented: $showCreatePoiSheet) {
                 AdminPoiFormSheet(
                     existingPoi: nil,
-                    defaultLatitude: locationManager.latitude,
-                    defaultLongitude: locationManager.longitude,
+                    hasFreshGpsFix: locationManager.hasFreshLocationFix,
+                    gpsAccuracyMeters: locationManager.horizontalAccuracyMeters,
+                    currentAzimuthDegrees: locationManager.azimuthDegrees,
                     language: appState.selectedLanguage,
                     onSaved: { _ in
                         Task { await loadAdminPois() }
@@ -117,12 +119,20 @@ public struct AdminModerationConsoleView: View {
             .sheet(item: $editingPoi) { poiToEdit in
                 AdminPoiFormSheet(
                     existingPoi: poiToEdit,
-                    defaultLatitude: poiToEdit.latitude,
-                    defaultLongitude: poiToEdit.longitude,
+                    hasFreshGpsFix: locationManager.hasFreshLocationFix,
+                    gpsAccuracyMeters: locationManager.horizontalAccuracyMeters,
+                    currentAzimuthDegrees: locationManager.azimuthDegrees,
                     language: appState.selectedLanguage,
                     onSaved: { _ in
                         Task { await loadAdminPois() }
                     }
+                )
+            }
+            .sheet(item: $poiForFixedArCard) { poi in
+                CreateFixedArCardSheet(
+                    poi: poi,
+                    language: appState.selectedLanguage,
+                    onCreated: { Task { await loadAdminPois() } }
                 )
             }
             .sheet(item: $rejectingPoi) { targetPoi in
@@ -193,6 +203,9 @@ public struct AdminModerationConsoleView: View {
                             poi: poi,
                             isSuperAdmin: isSuperAdmin,
                             language: appState.selectedLanguage,
+                            onCreateArCard: {
+                                poiForFixedArCard = poi
+                            },
                             onEdit: {
                                 editingPoi = poi
                             },
@@ -470,6 +483,7 @@ private struct AdminPoiRowCard: View {
     let poi: AdminPoiDto
     let isSuperAdmin: Bool
     let language: AppLanguage
+    let onCreateArCard: () -> Void
     let onEdit: () -> Void
     let onApprove: () -> Void
     let onReject: () -> Void
@@ -516,6 +530,21 @@ private struct AdminPoiRowCard: View {
                 .background(Color.red.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+
+            Button(action: onCreateArCard) {
+                Label(
+                    language == .vi ? "Tạo thẻ AR cố định tại địa điểm" : "Create fixed AR card at this POI",
+                    systemImage: "arkit"
+                )
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(Color.teal.opacity(0.14))
+                .foregroundStyle(.teal)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
 
             HStack(spacing: 10) {
                 Button(action: onEdit) {
@@ -592,14 +621,218 @@ private struct AdminPoiRowCard: View {
     }
 }
 
+private struct CreateFixedArCardSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var locationManager: LocationManager
+
+    let poi: AdminPoiDto
+    let language: AppLanguage
+    let onCreated: () -> Void
+
+    @State private var cardType = "HistoricalFact"
+    @State private var titleVi = ""
+    @State private var contentVi = ""
+    @State private var titleEn = ""
+    @State private var contentEn = ""
+    @State private var azimuthDegrees = 0.0
+    @State private var distanceMeters = 4.0
+    @State private var elevationMeters = 1.5
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private var isAtPoi: Bool {
+        locationManager.hasFreshLocationFix && locationManager.isWithinPoiGeofence(
+            poiLatitude: poi.latitude,
+            poiLongitude: poi.longitude,
+            activationRadiusMeters: poi.activationRadiusMeters
+        )
+    }
+
+    private var distanceToPoiMeters: Double {
+        locationManager.distanceInMeters(toLatitude: poi.latitude, longitude: poi.longitude)
+    }
+
+    private var hasContent: Bool {
+        (!titleVi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+         !titleEn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) &&
+        (!contentVi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+         !contentEn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(language == .vi ? "Địa điểm được ghim" : "Pinned POI") {
+                    LabeledContent(language == .vi ? "Địa điểm" : "Place", value: poi.name)
+                    LabeledContent(
+                        "GPS",
+                        value: String(format: "%.6f, %.6f", poi.latitude, poi.longitude)
+                    )
+                    Text(gpsStatusText)
+                        .font(.caption)
+                        .foregroundStyle(isAtPoi ? .green : .orange)
+                }
+
+                Section(language == .vi ? "Nội dung thẻ AR" : "AR card content") {
+                    Picker(language == .vi ? "Loại thẻ" : "Card type", selection: $cardType) {
+                        Text(language == .vi ? "Thông tin lịch sử" : "Historical fact").tag("HistoricalFact")
+                        Text(language == .vi ? "Điểm nhấn kiến trúc" : "Architecture note").tag("ArchitectureNote")
+                        Text(language == .vi ? "Câu chuyện nổi bật" : "Story highlight").tag("StoryHighlight")
+                        Text(language == .vi ? "Gợi ý hướng đi" : "Direction hint").tag("DirectionHint")
+                    }
+                    TextField("Tiêu đề (VI)", text: $titleVi)
+                    TextField("Nội dung (VI)", text: $contentVi, axis: .vertical)
+                        .lineLimit(3...7)
+                    TextField("Title (EN)", text: $titleEn)
+                    TextField("Content (EN)", text: $contentEn, axis: .vertical)
+                        .lineLimit(3...7)
+                }
+
+                Section(language == .vi ? "Vị trí cố định trong AR" : "Fixed AR placement") {
+                    HStack {
+                        Text(language == .vi ? "Hướng la bàn" : "Compass bearing")
+                        Spacer()
+                        Text("\(Int(azimuthDegrees.rounded()))°")
+                            .font(.caption.weight(.bold))
+                    }
+                    Slider(value: $azimuthDegrees, in: 0...359, step: 1)
+                    Button {
+                        azimuthDegrees = locationManager.azimuthDegrees
+                    } label: {
+                        Label(
+                            language == .vi
+                                ? "Ghim theo hướng camera hiện tại (\(Int(locationManager.azimuthDegrees))°)"
+                                : "Pin current camera direction (\(Int(locationManager.azimuthDegrees))°)",
+                            systemImage: "location.north.line.fill"
+                        )
+                    }
+                    .disabled(!isAtPoi)
+
+                    HStack {
+                        Text(language == .vi ? "Khoảng cách" : "Distance")
+                        Spacer()
+                        Text("\(String(format: "%.1f", distanceMeters))m")
+                            .font(.caption.weight(.bold))
+                    }
+                    Slider(value: $distanceMeters, in: 1...50, step: 0.5)
+
+                    HStack {
+                        Text(language == .vi ? "Độ cao" : "Elevation")
+                        Spacer()
+                        Text("\(String(format: "%.1f", elevationMeters))m")
+                            .font(.caption.weight(.bold))
+                    }
+                    Slider(value: $elevationMeters, in: -5...20, step: 0.5)
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(language == .vi ? "Tạo thẻ AR cố định" : "Create Fixed AR Card")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(language == .vi ? "Hủy" : "Cancel") { dismiss() }
+                        .disabled(isSaving)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await saveCard() }
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text(language == .vi ? "Tạo thẻ" : "Create")
+                                .fontWeight(.bold)
+                        }
+                    }
+                    .disabled(isSaving || !isAtPoi || !hasContent)
+                }
+            }
+            .onAppear {
+                if locationManager.hasFreshLocationFix {
+                    azimuthDegrees = locationManager.azimuthDegrees
+                }
+            }
+        }
+    }
+
+    private var gpsStatusText: String {
+        if !locationManager.hasFreshLocationFix {
+            return language == .vi
+                ? "Cần GPS thực mới và chính xác để ghim thẻ tại POI."
+                : "A fresh, accurate live GPS fix is required to pin this card at the POI."
+        }
+        if isAtPoi {
+            let accuracy = Int((locationManager.horizontalAccuracyMeters ?? 0).rounded())
+            return language == .vi
+                ? "Đang ở tại POI • Cách pin \(Int(distanceToPoiMeters.rounded()))m • GPS ±\(accuracy)m"
+                : "At the POI • \(Int(distanceToPoiMeters.rounded()))m from pin • GPS ±\(accuracy)m"
+        }
+        return language == .vi
+            ? "Hãy đến trong phạm vi \(Int(poi.activationRadiusMeters + 20))m của POI để tạo thẻ cố định."
+            : "Move within \(Int(poi.activationRadiusMeters + 20))m of this POI to create a fixed card."
+    }
+
+    private func saveCard() async {
+        guard isAtPoi, hasContent else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+
+        do {
+            let existingCards = try await APIClient.shared.getAdminArInfoCards(poiId: poi.id)
+            let nextOrder = (existingCards.map(\.displayOrder).max() ?? 0) + 1
+            let viTitle = titleVi.trimmingCharacters(in: .whitespacesAndNewlines)
+            let enTitle = titleEn.trimmingCharacters(in: .whitespacesAndNewlines)
+            let viContent = contentVi.trimmingCharacters(in: .whitespacesAndNewlines)
+            let enContent = contentEn.trimmingCharacters(in: .whitespacesAndNewlines)
+            let request = UpsertArInfoCardRequest(
+                cardType: cardType,
+                azimuthDegrees: azimuthDegrees,
+                distanceMeters: distanceMeters,
+                elevationMeters: elevationMeters,
+                displayOrder: nextOrder,
+                isActive: true,
+                localizations: [
+                    ArCardLocalizationInput(
+                        languageCode: "vi",
+                        title: viTitle.isEmpty ? enTitle : viTitle,
+                        subtitle: nil,
+                        content: viContent.isEmpty ? enContent : viContent
+                    ),
+                    ArCardLocalizationInput(
+                        languageCode: "en",
+                        title: enTitle.isEmpty ? viTitle : enTitle,
+                        subtitle: nil,
+                        content: enContent.isEmpty ? viContent : enContent
+                    )
+                ]
+            )
+            _ = try await APIClient.shared.createAdminArInfoCard(poiId: poi.id, request: request)
+            onCreated()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 // MARK: - Create / Edit POI Form Sheet (Admin & SuperAdmin)
 
 private struct AdminPoiFormSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var locationManager: LocationManager
 
     let existingPoi: AdminPoiDto?
-    let defaultLatitude: Double
-    let defaultLongitude: Double
+    let hasFreshGpsFix: Bool
+    let gpsAccuracyMeters: Double?
+    let currentAzimuthDegrees: Double
     let language: AppLanguage
     let onSaved: (AdminPoiDto) -> Void
 
@@ -626,7 +859,7 @@ private struct AdminPoiFormSheet: View {
             azimuthDegrees: 45,
             elevationMeters: 1.5,
             distanceMeters: 4.0,
-            cardType: "HistoryFact",
+            cardType: "HistoricalFact",
             titleVi: "Kiến trúc đặc trưng",
             summaryVi: "Điểm nhấn lịch sử và nghệ thuật kiến trúc độc đáo tại di tích.",
             titleEn: "Signature Architecture",
@@ -635,6 +868,7 @@ private struct AdminPoiFormSheet: View {
     ]
 
     @State private var isSaving: Bool = false
+    @State private var waitingForGpsCapture: Bool = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -658,6 +892,40 @@ private struct AdminPoiFormSheet: View {
                             .keyboardType(.decimalPad)
                         TextField("Longitude", text: $longitudeString)
                             .keyboardType(.decimalPad)
+                    }
+
+                    Button {
+                        if locationManager.hasFreshLocationFix,
+                           let location = locationManager.currentLocation {
+                            latitudeString = formattedCoordinate(location.coordinate.latitude)
+                            longitudeString = formattedCoordinate(location.coordinate.longitude)
+                            waitingForGpsCapture = false
+                        } else {
+                            waitingForGpsCapture = true
+                            locationManager.requestCurrentLocation()
+                        }
+                    } label: {
+                        Label(
+                            waitingForGpsCapture
+                                ? (language == .vi ? "Đang lấy tọa độ GPS…" : "Getting GPS coordinates…")
+                                : (language == .vi ? "Lấy tọa độ GPS hiện tại" : "Use current GPS coordinates"),
+                            systemImage: "location.fill"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+
+                    if hasFreshGpsFix, let gpsAccuracyMeters {
+                        Text(language == .vi
+                             ? "GPS mới nhất, độ chính xác khoảng ±\(Int(gpsAccuracyMeters.rounded()))m"
+                             : "Latest GPS fix, accuracy about ±\(Int(gpsAccuracyMeters.rounded()))m")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(language == .vi
+                             ? "Đang chờ GPS thực; không dùng tọa độ mặc định để tạo POI."
+                             : "Waiting for live GPS; default coordinates will not be used for a new POI.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
 
                     VStack(alignment: .leading) {
@@ -699,6 +967,17 @@ private struct AdminPoiFormSheet: View {
                                     .font(.caption.weight(.bold))
                                 Slider(value: $card.azimuthDegrees, in: 0...359, step: 5)
                             }
+                            Button {
+                                card.azimuthDegrees = currentAzimuthDegrees
+                            } label: {
+                                Label(
+                                    language == .vi
+                                        ? "Ghim theo hướng camera hiện tại (\(Int(currentAzimuthDegrees))°)"
+                                        : "Pin current camera direction (\(Int(currentAzimuthDegrees))°)",
+                                    systemImage: "location.north.line.fill"
+                                )
+                            }
+                            .buttonStyle(.bordered)
                             TextField("Tiêu đề thẻ AR (VI)", text: $card.titleVi)
                             TextField("Nội dung tóm tắt AR (VI)", text: $card.summaryVi)
                             TextField("AR Card Title (EN)", text: $card.titleEn)
@@ -710,7 +989,7 @@ private struct AdminPoiFormSheet: View {
                     Button {
                         arCards.append(
                             ArInfoCardInput(
-                                azimuthDegrees: Double((arCards.count * 60) % 360),
+                                azimuthDegrees: currentAzimuthDegrees,
                                 elevationMeters: 1.5,
                                 distanceMeters: 4.0
                             )
@@ -762,8 +1041,8 @@ private struct AdminPoiFormSheet: View {
                 if let poi = existingPoi {
                     slug = poi.slug
                     category = poi.category
-                    latitudeString = String(format: "%.6f", poi.latitude)
-                    longitudeString = String(format: "%.6f", poi.longitude)
+                    latitudeString = formattedCoordinate(poi.latitude)
+                    longitudeString = formattedCoordinate(poi.longitude)
                     activationRadius = poi.activationRadiusMeters
                     nameVi = poi.name
                     summaryVi = poi.shortSummary
@@ -772,16 +1051,51 @@ private struct AdminPoiFormSheet: View {
                     summaryEn = poi.shortSummary
                     storyMarkdownEn = poi.shortSummary
                 } else {
-                    latitudeString = String(format: "%.6f", defaultLatitude)
-                    longitudeString = String(format: "%.6f", defaultLongitude)
+                    if locationManager.hasFreshLocationFix,
+                       let location = locationManager.currentLocation {
+                        latitudeString = formattedCoordinate(location.coordinate.latitude)
+                        longitudeString = formattedCoordinate(location.coordinate.longitude)
+                    } else {
+                        latitudeString = ""
+                        longitudeString = ""
+                    }
+                    if !arCards.isEmpty {
+                        arCards[0].azimuthDegrees = currentAzimuthDegrees
+                    }
                 }
+            }
+            .onReceive(locationManager.$currentLocation.compactMap { $0 }) { location in
+                guard existingPoi == nil,
+                      locationManager.hasFreshLocationFix,
+                      waitingForGpsCapture || (latitudeString.isEmpty && longitudeString.isEmpty) else { return }
+                latitudeString = formattedCoordinate(location.coordinate.latitude)
+                longitudeString = formattedCoordinate(location.coordinate.longitude)
+                waitingForGpsCapture = false
+            }
+            .onReceive(locationManager.$locationError.compactMap { $0 }) { gpsError in
+                guard waitingForGpsCapture else { return }
+                errorMessage = gpsError
+                waitingForGpsCapture = false
             }
         }
     }
 
+    private func formattedCoordinate(_ value: Double) -> String {
+        String(
+            format: "%.6f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            arguments: [value]
+        )
+    }
+
     private func savePoi() async {
-        guard let lat = Double(latitudeString), let lng = Double(longitudeString) else {
+        guard let lat = Double(latitudeString.replacingOccurrences(of: ",", with: ".")),
+              let lng = Double(longitudeString.replacingOccurrences(of: ",", with: ".")) else {
             errorMessage = "Tọa độ Latitude / Longitude không hợp lệ."
+            return
+        }
+        guard (-90.0...90.0).contains(lat), (-180.0...180.0).contains(lng) else {
+            errorMessage = "Latitude phải từ -90 đến 90 và Longitude phải từ -180 đến 180."
             return
         }
 

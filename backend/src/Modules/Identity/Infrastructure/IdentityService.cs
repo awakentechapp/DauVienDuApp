@@ -120,6 +120,7 @@ public sealed class IdentityService : IIdentityService
         var tokenHash = JwtTokenGenerator.ComputeTokenHash(request.RefreshToken);
 
         var storedToken = await _dbContext.RefreshTokens
+            .AsNoTracking()
             .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash, ct);
 
         if (storedToken is null || storedToken.RevokedAt != null || now >= storedToken.ExpiresAt)
@@ -143,8 +144,7 @@ public sealed class IdentityService : IIdentityService
 
         if (!user.IsActive)
         {
-            storedToken.Revoke(now);
-            await _dbContext.SaveChangesAsync(ct);
+            await RevokeRefreshTokenAtomicallyAsync(storedToken.Id, now, ct);
 
             return Result.Failure<AuthTokenResponse>(new Error(
                 ErrorCodes.AuthAccountLocked,
@@ -152,11 +152,62 @@ public sealed class IdentityService : IIdentityService
                 ErrorType.Forbidden));
         }
 
-        storedToken.Revoke(now);
-        var response = await IssueTokensAsync(user, ct);
-        await _dbContext.SaveChangesAsync(ct);
+        AuthTokenResponse response;
+        if (_dbContext.Database.IsRelational())
+        {
+            // Consume the refresh token with a conditional database update. Two concurrent
+            // requests can no longer both rotate the same token into separate valid sessions.
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
+            var consumed = await _dbContext.RefreshTokens
+                .Where(rt => rt.Id == storedToken.Id && rt.RevokedAt == null && rt.ExpiresAt > now)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(rt => rt.RevokedAt, (DateTimeOffset?)now), ct);
+
+            if (consumed != 1)
+            {
+                await transaction.RollbackAsync(ct);
+                return Result.Failure<AuthTokenResponse>(new Error(
+                    ErrorCodes.AuthInvalidRefreshToken,
+                    "Refresh token is invalid, expired, or already revoked.",
+                    ErrorType.Unauthorized));
+            }
+
+            response = await IssueTokensAsync(user, ct);
+            await _dbContext.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        else
+        {
+            // EF in-memory providers do not support ExecuteUpdate/transactions; keep the
+            // non-relational path useful for unit tests while production PostgreSQL uses CAS.
+            storedToken.Revoke(now);
+            _dbContext.RefreshTokens.Update(storedToken);
+            response = await IssueTokensAsync(user, ct);
+            await _dbContext.SaveChangesAsync(ct);
+        }
 
         return Result.Success(response);
+    }
+
+    private async Task<int> RevokeRefreshTokenAtomicallyAsync(
+        Guid tokenId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (!_dbContext.Database.IsRelational())
+        {
+            var token = await _dbContext.RefreshTokens
+                .FirstOrDefaultAsync(rt => rt.Id == tokenId, ct);
+            if (token is null || token.RevokedAt != null)
+                return 0;
+
+            token.Revoke(now);
+            await _dbContext.SaveChangesAsync(ct);
+            return 1;
+        }
+
+        return await _dbContext.RefreshTokens
+            .Where(rt => rt.Id == tokenId && rt.RevokedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(rt => rt.RevokedAt, (DateTimeOffset?)now), ct);
     }
 
     public async Task<Result> LogoutAsync(

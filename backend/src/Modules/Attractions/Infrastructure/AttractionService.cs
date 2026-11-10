@@ -51,6 +51,7 @@ public sealed class AttractionService : IAttractionService
             latitude,
             longitude,
             normalizedRadiusKm);
+        var crossesAntimeridian = minLng > maxLng;
 
         var candidates = await _dbContext.PointsOfInterest
             .AsNoTracking()
@@ -58,7 +59,9 @@ public sealed class AttractionService : IAttractionService
             .Where(x =>
                 x.Status == PoiStatus.Published &&
                 x.Latitude >= minLat && x.Latitude <= maxLat &&
-                x.Longitude >= minLng && x.Longitude <= maxLng)
+                (crossesAntimeridian
+                    ? x.Longitude >= minLng || x.Longitude <= maxLng
+                    : x.Longitude >= minLng && x.Longitude <= maxLng))
             .ToListAsync(cancellationToken);
 
         var matched = new List<(PointOfInterest Poi, double DistanceMeters, bool CanActivateAr)>();

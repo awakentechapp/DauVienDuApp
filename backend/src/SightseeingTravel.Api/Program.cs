@@ -18,6 +18,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
+builder.Services.AddHttpClient("OsrmRouting", client =>
+{
+    var baseUrl = builder.Configuration["Routing:BaseUrl"] ?? "http://127.0.0.1:5000/";
+    client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 
 builder.Services.Configure<ContaboStorageOptions>(
     builder.Configuration.GetSection(ContaboStorageOptions.SectionName));
@@ -145,6 +151,7 @@ app.MapIdentityEndpoints();
 app.MapAttractionsEndpoints();
 app.MapArExperienceEndpoints();
 app.MapCommunityMediaEndpoints();
+app.MapNavigationEndpoints();
 
 // 6. Optional Database Migration & Seed on Startup when configured
 if (app.Configuration.GetValue("Database:ApplyMigrationsAndSeedOnStartup", false))

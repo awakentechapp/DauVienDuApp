@@ -36,10 +36,8 @@ public struct PoiDetailSheetView: View {
     }
 
     private var isWithinGeofence: Bool {
-        if let canActivate = detail?.canActivateAr, canActivate {
-            return true
-        }
-        return poiSummary.isWithinGeofence(userDistanceMeters: liveDistanceMeters)
+        locationManager.hasFreshLocationFix &&
+            liveDistanceMeters <= (poiSummary.activationRadiusMeters + 20.0)
     }
 
     public var body: some View {

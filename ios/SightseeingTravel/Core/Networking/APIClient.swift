@@ -1,6 +1,10 @@
 import Foundation
 import UIKit
 
+private struct ItemsResponse<T: Decodable & Sendable>: Decodable, Sendable {
+    let items: [T]
+}
+
 public enum NetworkError: Error, LocalizedError, Sendable {
     case invalidURL
     case unauthorized
@@ -278,12 +282,94 @@ public actor APIClient {
         return try await sendFlexibleListRequest(path: "/admin/pois", queryItems: queryItems)
     }
 
+    public func getAdminArInfoCards(poiId: String) async throws -> [AdminArInfoCardDto] {
+        try await sendFlexibleListRequest(path: "/admin/pois/\(poiId)/ar-cards", queryItems: [])
+    }
+
+    public func createAdminArInfoCard(
+        poiId: String,
+        request: UpsertArInfoCardRequest
+    ) async throws -> AdminArInfoCardDto {
+        try await sendRequest(
+            path: "/admin/pois/\(poiId)/ar-cards",
+            method: "POST",
+            body: request
+        )
+    }
+
     public func createAdminPoi(_ request: UpsertPoiRequest) async throws -> AdminPoiDto {
-        try await sendRequest(path: "/admin/pois", method: "POST", body: request)
+        // Reuse a POI with the same code if a previous create succeeded but its AR-card
+        // follow-up failed; this makes retrying the editor idempotent instead of duplicating it.
+        let existingPois = (try? await getAdminPois()) ?? []
+        let saved: AdminPoiDto
+        if let existing = existingPois.first(where: { $0.slug.caseInsensitiveCompare(request.slug) == .orderedSame }) {
+            saved = try await sendRequest(path: "/admin/pois/\(existing.id)", method: "PUT", body: request)
+        } else {
+            saved = try await sendRequest(path: "/admin/pois", method: "POST", body: request)
+        }
+        try await syncAdminArCards(poiId: saved.id, inputs: request.arInfoCards ?? [])
+        return saved
     }
 
     public func updateAdminPoi(poiId: String, request: UpsertPoiRequest) async throws -> AdminPoiDto {
-        try await sendRequest(path: "/admin/pois/\(poiId)", method: "PUT", body: request)
+        let saved: AdminPoiDto = try await sendRequest(path: "/admin/pois/\(poiId)", method: "PUT", body: request)
+        try await syncAdminArCards(poiId: saved.id, inputs: request.arInfoCards ?? [])
+        return saved
+    }
+
+    private func syncAdminArCards(poiId: String, inputs: [ArInfoCardInput]) async throws {
+        let existing: [AdminArInfoCardDto] = try await sendFlexibleListRequest(
+            path: "/admin/pois/\(poiId)/ar-cards",
+            queryItems: []
+        )
+
+        for (offset, input) in inputs.enumerated() {
+            let order = offset + 1
+            let localizations = [
+                ArCardLocalizationInput(
+                    languageCode: "vi",
+                    title: input.titleVi.isEmpty ? input.titleEn : input.titleVi,
+                    subtitle: nil,
+                    content: input.summaryVi.isEmpty ? input.summaryEn : input.summaryVi
+                ),
+                ArCardLocalizationInput(
+                    languageCode: "en",
+                    title: input.titleEn.isEmpty ? input.titleVi : input.titleEn,
+                    subtitle: nil,
+                    content: input.summaryEn.isEmpty ? input.summaryVi : input.summaryEn
+                )
+            ]
+            let payload = UpsertArInfoCardRequest(
+                cardType: input.cardType,
+                azimuthDegrees: input.azimuthDegrees,
+                distanceMeters: input.distanceMeters,
+                elevationMeters: input.elevationMeters,
+                displayOrder: order,
+                isActive: true,
+                localizations: localizations
+            )
+
+            if let card = existing.first(where: { $0.displayOrder == order }) {
+                let _: AdminArInfoCardDto = try await sendRequest(
+                    path: "/admin/ar-cards/\(card.id)",
+                    method: "PUT",
+                    body: payload
+                )
+            } else {
+                let _: AdminArInfoCardDto = try await sendRequest(
+                    path: "/admin/pois/\(poiId)/ar-cards",
+                    method: "POST",
+                    body: payload
+                )
+            }
+        }
+
+        for staleCard in existing where staleCard.displayOrder > inputs.count {
+            let _: GenericMessageResponse? = try await sendRequest(
+                path: "/admin/ar-cards/\(staleCard.id)",
+                method: "DELETE"
+            )
+        }
     }
 
     public func approvePoi(poiId: String) async throws -> AdminPoiDto {
@@ -305,7 +391,7 @@ public actor APIClient {
         note: String? = nil
     ) async throws {
         let payload = ModerationDecisionRequest(decision: decision, note: note)
-        let _: GenericMessageResponse? = try await sendRequest(
+        let _: ReportedPhotoQueueItemDto = try await sendRequest(
             path: "/admin/moderation/photos/\(photoId)/decision",
             method: "POST",
             body: payload
@@ -344,7 +430,7 @@ public actor APIClient {
 
     // MARK: - Core HTTP Request Execution with Automatic 401 Refresh
 
-    private func sendFlexibleListRequest<T: Codable & Sendable>(
+    private func sendFlexibleListRequest<T: Decodable & Sendable>(
         path: String,
         queryItems: [URLQueryItem]
     ) async throws -> [T] {
@@ -363,10 +449,13 @@ public actor APIClient {
         if let paged = try? decoder.decode(PagedResponse<T>.self, from: data) {
             return paged.items
         }
-        throw NetworkError.decodingError("Expected array or PagedResponse for \(T.self)")
+        if let items = try? decoder.decode(ItemsResponse<T>.self, from: data) {
+            return items.items
+        }
+        throw NetworkError.decodingError("Expected array, PagedResponse, or `{ items }` for \(T.self)")
     }
 
-    private func sendRequest<Response: Codable & Sendable>(
+    private func sendRequest<Response: Decodable & Sendable>(
         path: String,
         method: String,
         queryItems: [URLQueryItem] = [],
@@ -388,7 +477,7 @@ public actor APIClient {
         return try decoder.decode(Response.self, from: data)
     }
 
-    private func sendRequest<Body: Encodable & Sendable, Response: Codable & Sendable>(
+    private func sendRequest<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         path: String,
         method: String,
         queryItems: [URLQueryItem] = [],
@@ -412,7 +501,7 @@ public actor APIClient {
         return try decoder.decode(Response.self, from: data)
     }
 
-    private func sendRawDataRequest<Response: Codable & Sendable>(
+    private func sendRawDataRequest<Response: Decodable & Sendable>(
         path: String,
         method: String,
         contentType: String,

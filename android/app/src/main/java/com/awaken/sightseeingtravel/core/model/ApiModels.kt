@@ -25,6 +25,24 @@ data class ApiErrorDto(
     @SerializedName("details") val details: List<String>? = null
 )
 
+data class CalculateRouteRequestDto(
+    @SerializedName("originLatitude") val originLatitude: Double,
+    @SerializedName("originLongitude") val originLongitude: Double,
+    @SerializedName("destinationLatitude") val destinationLatitude: Double,
+    @SerializedName("destinationLongitude") val destinationLongitude: Double
+)
+
+data class RouteCoordinateDto(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double
+)
+
+data class CalculatedRouteDto(
+    @SerializedName("distanceMeters") val distanceMeters: Double,
+    @SerializedName("durationSeconds") val durationSeconds: Double,
+    @SerializedName("coordinates") val coordinates: List<RouteCoordinateDto>
+)
+
 /**
  * User Roles (`Tourist`, `Admin`, `SuperAdmin`)
  */
@@ -88,7 +106,7 @@ data class LogoutRequest(
 data class AuthTokensResponse(
     @SerializedName("accessToken") val accessToken: String,
     @SerializedName("refreshToken") val refreshToken: String,
-    @SerializedName("expiresInSeconds") val expiresInSeconds: Long = 3600,
+    @SerializedName("expiresAt") val expiresAt: String? = null,
     @SerializedName("user") val user: UserProfileDto
 )
 
@@ -99,6 +117,7 @@ data class UserProfileDto(
     @SerializedName("avatarUrl") val avatarUrl: String? = null,
     @SerializedName("role") val role: String = "Tourist",
     @SerializedName("preferredLanguage") val preferredLanguage: String = "vi",
+    @SerializedName("isActive") val isActive: Boolean = true,
     @SerializedName("createdAt") val createdAt: String? = null
 ) {
     val parsedRole: UserRole
@@ -230,7 +249,7 @@ data class CommunityPhotoDto(
     @SerializedName("caption") val caption: String? = null,
     @SerializedName("capturedLatitude") val capturedLatitude: Double = 0.0,
     @SerializedName("capturedLongitude") val capturedLongitude: Double = 0.0,
-    @SerializedName("azimuthDegrees") val azimuthDegrees: Float = 0f,
+    @SerializedName("azimuthDegrees") val azimuthDegrees: Float? = null,
     @SerializedName("elevationMeters") val elevationMeters: Float = 1.5f,
     @SerializedName("likeCount") val likeCount: Int = 0,
     @SerializedName("isLikedByCurrentUser") val isLikedByCurrentUser: Boolean = false,
@@ -252,7 +271,7 @@ data class ReportPhotoRequest(
 
 data class ReportPhotoResponseDto(
     @SerializedName("photoId") val photoId: String,
-    @SerializedName("reportId") val reportId: String,
+    @SerializedName("reportId") val reportId: String? = null,
     @SerializedName("status") val status: String = "PendingModeration"
 )
 
@@ -267,7 +286,7 @@ data class DeletePhotoResponseDto(
 
 data class PoiTranslationInputDto(
     @SerializedName("languageCode") val languageCode: String, // "vi" or "en"
-    @SerializedName("title") val title: String,
+    @SerializedName(value = "name", alternate = ["title"]) val title: String,
     @SerializedName("shortSummary") val shortSummary: String,
     @SerializedName("culturalStoryMarkdown") val culturalStoryMarkdown: String,
     @SerializedName("historicalPeriod") val historicalPeriod: String? = null,
@@ -286,8 +305,37 @@ data class ArInfoCardInputDto(
     @SerializedName("displayOrder") val displayOrder: Int = 1
 )
 
+data class ArCardLocalizationInputDto(
+    @SerializedName("languageCode") val languageCode: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("subtitle") val subtitle: String? = null,
+    @SerializedName("content") val content: String
+)
+
+data class UpsertArInfoCardRequest(
+    @SerializedName("cardType") val cardType: String,
+    @SerializedName("azimuthDegrees") val azimuthDegrees: Float,
+    @SerializedName("distanceMeters") val distanceMeters: Float,
+    @SerializedName("elevationMeters") val elevationMeters: Float,
+    @SerializedName("displayOrder") val displayOrder: Int,
+    @SerializedName("isActive") val isActive: Boolean,
+    @SerializedName("localizations") val localizations: List<ArCardLocalizationInputDto>
+)
+
+data class AdminArInfoCardDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("poiId") val poiId: String,
+    @SerializedName("cardType") val cardType: String,
+    @SerializedName("azimuthDegrees") val azimuthDegrees: Double,
+    @SerializedName("distanceMeters") val distanceMeters: Double,
+    @SerializedName("elevationMeters") val elevationMeters: Double,
+    @SerializedName("displayOrder") val displayOrder: Int,
+    @SerializedName("isActive") val isActive: Boolean,
+    @SerializedName("localizations") val localizations: List<ArCardLocalizationInputDto> = emptyList()
+)
+
 data class CreateOrUpdatePoiRequest(
-    @SerializedName("slug") val slug: String,
+    @SerializedName(value = "code", alternate = ["slug"]) val slug: String,
     @SerializedName("category") val category: String,
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
@@ -295,8 +343,9 @@ data class CreateOrUpdatePoiRequest(
     @SerializedName("activationRadiusMeters") val activationRadiusMeters: Double = 50.0,
     @SerializedName("coverImageUrl") val coverImageUrl: String? = null,
     @SerializedName("audioGuideUrl") val audioGuideUrl: String? = null,
-    @SerializedName("translations") val translations: List<PoiTranslationInputDto>,
-    @SerializedName("arInfoCards") val arInfoCards: List<ArInfoCardInputDto> = emptyList()
+    @SerializedName(value = "localizations", alternate = ["translations"]) val translations: List<PoiTranslationInputDto>,
+    @SerializedName("arInfoCards") val arInfoCards: List<ArInfoCardInputDto> = emptyList(),
+    @SerializedName("saveAsDraft") val saveAsDraft: Boolean = false
 )
 
 data class ApprovePoiRequest(
@@ -304,7 +353,7 @@ data class ApprovePoiRequest(
 )
 
 data class RejectPoiRequest(
-    @SerializedName("rejectionReason") val rejectionReason: String
+    @SerializedName(value = "reason", alternate = ["rejectionReason"]) val rejectionReason: String
 )
 
 data class AdminPoiDto(
@@ -343,6 +392,7 @@ data class ModerationPhotoItemDto(
 )
 
 data class ModeratePhotoDecisionRequest(
-    @SerializedName("decision") val decision: String, // "Keep" or "Remove"
-    @SerializedName("moderatorNotes") val moderatorNotes: String? = null
+    @SerializedName(value = "action", alternate = ["decision"]) val decision: String, // "Approve" or "Remove"
+    @SerializedName(value = "note", alternate = ["moderatorNotes"]) val moderatorNotes: String? = null,
+    @SerializedName("hardDeleteFromStorage") val hardDeleteFromStorage: Boolean = false
 )

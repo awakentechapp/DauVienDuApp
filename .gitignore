@@ -30,3 +30,6 @@ DerivedData/
 # Built APK binary at root (optional - keep repo lightweight)
 SightseeingTravel-debug.apk
 SightseeingTravel-v1.1.apk
+
+# Generated OpenStreetMap routing graph (large binary files)
+deploy/routing/data/

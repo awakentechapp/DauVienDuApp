@@ -3,6 +3,7 @@ package com.awaken.sightseeingtravel.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.awaken.sightseeingtravel.BuildConfig
 import com.awaken.sightseeingtravel.core.model.*
 import com.awaken.sightseeingtravel.core.network.SightseeingApiService
 import com.awaken.sightseeingtravel.core.network.SightseeingNetworkModule
@@ -10,6 +11,8 @@ import com.awaken.sightseeingtravel.core.network.TokenStore
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -25,12 +28,31 @@ data class SightseeingUiState(
     val errorMessage: String? = null,
     val nearbyPois: List<PoiPinSummaryDto> = emptyList(),
     val selectedPoiDetail: PoiDetailDto? = null,
+    val navigationTarget: NavigationTarget? = null,
+    val activeNavigationRoute: ActiveNavigationRoute? = null,
+    val isCalculatingRoute: Boolean = false,
+    val navigationError: String? = null,
     val activeArContext: PoiArContextDto? = null,
     val poiCommunityPhotos: List<CommunityPhotoDto> = emptyList(),
     val photoSortBy: String = "popular", // "popular" or "latest"
     val adminPois: List<AdminPoiDto> = emptyList(),
     val adminStatusFilter: String? = null,
     val reportedPhotos: List<ModerationPhotoItemDto> = emptyList()
+)
+
+data class NavigationTarget(
+    val poiId: String,
+    val title: String,
+    val latitude: Double,
+    val longitude: Double
+)
+
+data class ActiveNavigationRoute(
+    val routeId: Long,
+    val target: NavigationTarget,
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val coordinates: List<RouteCoordinateDto>
 )
 
 class SightseeingAppViewModel(application: Application) : AndroidViewModel(application) {
@@ -43,6 +65,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     val tokenStore = TokenStore(application)
     private val apiService: SightseeingApiService =
         SightseeingNetworkModule.createApiService(tokenStore)
+    private var navigationJob: Job? = null
     val locationAndOrientationTracker = LocationAndOrientationTracker(application)
 
     val spatialPose: StateFlow<DeviceSpatialPose> = locationAndOrientationTracker.spatialPose
@@ -62,7 +85,12 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             }
         }
         val initialPose = spatialPose.value
-        loadNearbyPois(initialPose.latitude, initialPose.longitude)
+        if (!tokenStore.accessToken.isNullOrBlank()) {
+            loadNearbyPois(initialPose.latitude, initialPose.longitude)
+        } else if (tokenStore.currentUser.value != null) {
+            // A profile without its access token is not an authenticated session.
+            tokenStore.clearSession()
+        }
     }
 
     fun startSensors() {
@@ -92,56 +120,9 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
 
     // ========================================================================
     // 1. AUTHENTICATION & ROLE MANAGEMENT (`Tourist`, `Admin`, `SuperAdmin`)
-    // Dedicated Accounts:
-    // - Tourist:    ID = testapp   | Password = TestApp123456
-    // - Admin:      ID = testadmin | Password = TestApp123456
-    // - SuperAdmin: ID = sa        | Password = AwakenTech150520#
     // ========================================================================
-
-    private data class BuiltInTestAccount(
-        val id: String,
-        val password: String,
-        val displayName: String,
-        val role: UserRole
-    )
-
-    private val builtInTestAccounts = listOf(
-        BuiltInTestAccount(
-            id = "testapp",
-            password = "TestApp123456",
-            displayName = "Du Khách Kiểm Thử (testapp)",
-            role = UserRole.TOURIST
-        ),
-        BuiltInTestAccount(
-            id = "testadmin",
-            password = "TestApp123456",
-            displayName = "Quản Trị Viên (testadmin)",
-            role = UserRole.ADMIN
-        ),
-        BuiltInTestAccount(
-            id = "sa",
-            password = "AwakenTech150520#",
-            displayName = "Chủ Quản Hệ Thống (sa)",
-            role = UserRole.SUPER_ADMIN
-        )
-    )
-
     fun login(accountIdOrEmail: String, password: String, onSuccess: () -> Unit = {}) {
         val trimmedId = accountIdOrEmail.trim()
-        val matchedBuiltIn = builtInTestAccounts.firstOrNull {
-            it.id.equals(trimmedId, ignoreCase = true)
-        }
-
-        if (matchedBuiltIn != null && matchedBuiltIn.password != password) {
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    errorMessage = "Sai mật khẩu cho tài khoản '${matchedBuiltIn.id}'. Vui lòng kiểm tra lại mật khẩu."
-                )
-            }
-            return
-        }
-
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
@@ -161,42 +142,21 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                             statusBannerMessage = "Đã đăng nhập: ${authData.user.displayName} (${authData.user.role})"
                         )
                     }
+                    loadNearbyPois()
                     onSuccess()
                     return@launch
                 }
-            } catch (_: Exception) {
-                // Proceed to local built-in account verification
-            }
-
-            if (matchedBuiltIn != null) {
-                val userProfile = UserProfileDto(
-                    id = "usr-${matchedBuiltIn.id.lowercase()}",
-                    email = matchedBuiltIn.id,
-                    displayName = matchedBuiltIn.displayName,
-                    role = matchedBuiltIn.role.wireValue,
-                    preferredLanguage = _uiState.value.selectedLanguage
-                )
-                tokenStore.saveSession(
-                    accessToken = "jwt-session-${matchedBuiltIn.id}-${System.currentTimeMillis()}",
-                    refreshToken = "jwt-refresh-${matchedBuiltIn.id}-${System.currentTimeMillis()}",
-                    user = userProfile
-                )
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        currentUser = userProfile,
-                        statusBannerMessage = "Đã đăng nhập: ${userProfile.displayName} • Quyền: ${userProfile.role}"
+                        errorMessage = response.error?.message ?: "Máy chủ không trả về phiên đăng nhập hợp lệ."
                     )
                 }
-                if (matchedBuiltIn.role == UserRole.ADMIN || matchedBuiltIn.role == UserRole.SUPER_ADMIN) {
-                    loadAdminConsoleData()
-                }
-                onSuccess()
-            } else {
+            } catch (error: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "Tài khoản không hợp lệ. Vui lòng dùng: testapp, testadmin hoặc sa."
+                        errorMessage = error.message ?: "Không thể đăng nhập. Vui lòng kiểm tra kết nối và thông tin tài khoản."
                     )
                 }
             }
@@ -236,6 +196,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                             statusBannerMessage = "Welcome, ${authData.user.displayName}!"
                         )
                     }
+                    loadNearbyPois()
                     onSuccess()
                 } else {
                     _uiState.update {
@@ -245,34 +206,20 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         )
                     }
                 }
-            } catch (_: Exception) {
-                val fallbackUser = UserProfileDto(
-                    id = "usr-tourist-${System.currentTimeMillis()}",
-                    email = email.trim(),
-                    displayName = displayName.trim().ifBlank { "Traveler" },
-                    role = UserRole.TOURIST.wireValue,
-                    preferredLanguage = preferredLanguage
-                )
-                tokenStore.saveSession(
-                    accessToken = "jwt-session-${System.currentTimeMillis()}",
-                    refreshToken = "jwt-refresh-${System.currentTimeMillis()}",
-                    user = fallbackUser
-                )
+            } catch (error: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        currentUser = fallbackUser,
-                        selectedLanguage = preferredLanguage,
-                        statusBannerMessage = "Registered & signed in as ${fallbackUser.displayName} (Tourist)"
+                        errorMessage = error.message ?: "Không thể đăng ký tài khoản. Vui lòng thử lại."
                     )
                 }
-                onSuccess()
             }
         }
     }
 
     fun logout() {
         viewModelScope.launch {
+            clearNavigation()
             val refresh = tokenStore.refreshToken
             if (!refresh.isNullOrBlank()) {
                 runCatching { apiService.logout(LogoutRequest(refresh)) }
@@ -296,6 +243,11 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         longitude: Double = spatialPose.value.longitude,
         language: String = _uiState.value.selectedLanguage
     ) {
+        if (tokenStore.accessToken.isNullOrBlank()) {
+            _uiState.update { it.copy(isLoading = false) }
+            return
+        }
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
@@ -319,14 +271,30 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        nearbyPois = if (list.isNotEmpty()) list else buildSeedNearbyPois(latitude, longitude, language)
+                        nearbyPois = if (list.isNotEmpty() || !BuildConfig.DEBUG) {
+                            list
+                        } else {
+                            buildSeedNearbyPois(latitude, longitude, language)
+                        }
                     )
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                if ((error as? retrofit2.HttpException)?.code() == 401) {
+                    tokenStore.clearSession()
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            nearbyPois = emptyList(),
+                            errorMessage = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
+                        )
+                    }
+                    return@launch
+                }
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        nearbyPois = buildSeedNearbyPois(latitude, longitude, language)
+                        nearbyPois = if (BuildConfig.DEBUG) buildSeedNearbyPois(latitude, longitude, language) else it.nearbyPois,
+                        errorMessage = error.message ?: "Không thể tải địa điểm từ máy chủ."
                     )
                 }
             }
@@ -358,7 +326,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         )
                     }
                     loadCommunityPhotos(poiId, _uiState.value.photoSortBy)
-                } else {
+                } else if (BuildConfig.DEBUG) {
                     val fallback = buildFallbackPoiDetail(poiId, latitude, longitude, lang)
                     _uiState.update {
                         it.copy(
@@ -367,15 +335,25 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                             poiCommunityPhotos = fallback.highlightedCommunityPhotos
                         )
                     }
+                } else {
+                    _uiState.update {
+                        it.copy(isLoading = false, selectedPoiDetail = null, errorMessage = "Máy chủ không trả về chi tiết địa điểm.")
+                    }
                 }
-            } catch (_: Exception) {
-                val fallback = buildFallbackPoiDetail(poiId, latitude, longitude, lang)
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        selectedPoiDetail = fallback,
-                        poiCommunityPhotos = fallback.highlightedCommunityPhotos
-                    )
+            } catch (error: Exception) {
+                if (BuildConfig.DEBUG) {
+                    val fallback = buildFallbackPoiDetail(poiId, latitude, longitude, lang)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            selectedPoiDetail = fallback,
+                            poiCommunityPhotos = fallback.highlightedCommunityPhotos
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(isLoading = false, selectedPoiDetail = null, errorMessage = error.message ?: "Không thể tải chi tiết địa điểm.")
+                    }
                 }
             }
         }
@@ -385,11 +363,129 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         _uiState.update { it.copy(selectedPoiDetail = null) }
     }
 
+    fun calculateRouteToPin(
+        poiId: String,
+        title: String,
+        latitude: Double,
+        longitude: Double
+    ) {
+        navigationJob?.cancel()
+        val target = NavigationTarget(poiId, title, latitude, longitude)
+        val pose = spatialPose.value
+        val isEn = _uiState.value.selectedLanguage == "en"
+        _uiState.update {
+            it.copy(
+                selectedPoiDetail = null,
+                navigationTarget = target,
+                activeNavigationRoute = null,
+                isCalculatingRoute = false,
+                navigationError = null
+            )
+        }
+
+        if (!pose.hasFreshGpsFix || pose.isSimulatedLocation) {
+            _uiState.update {
+                it.copy(
+                    navigationError = if (isEn) {
+                        "Waiting for a real GPS location. Try again when the location dot appears."
+                    } else {
+                        "Đang chờ vị trí GPS thật. Hãy thử lại khi chấm vị trí của bạn xuất hiện trên bản đồ."
+                    }
+                )
+            }
+            return
+        }
+
+        if (tokenStore.accessToken.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(navigationError = if (isEn) {
+                    "Please sign in to calculate a route."
+                } else {
+                    "Vui lòng đăng nhập để tính tuyến đường."
+                })
+            }
+            return
+        }
+
+        navigationJob = viewModelScope.launch {
+            _uiState.update { it.copy(isCalculatingRoute = true, navigationError = null) }
+            try {
+                val response = apiService.calculateRoute(
+                    CalculateRouteRequestDto(
+                        originLatitude = pose.latitude,
+                        originLongitude = pose.longitude,
+                        destinationLatitude = target.latitude,
+                        destinationLongitude = target.longitude
+                    )
+                )
+                val route = response.data
+                if (!response.success || route == null || route.coordinates.size < 2) {
+                    _uiState.update {
+                        it.copy(
+                            isCalculatingRoute = false,
+                            navigationError = if (it.selectedLanguage == "en") {
+                                "No drivable route was found to this pin."
+                            } else {
+                                "Không tìm thấy tuyến đường bộ đến pin này."
+                            }
+                        )
+                    }
+                    return@launch
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isCalculatingRoute = false,
+                        navigationError = null,
+                        activeNavigationRoute = ActiveNavigationRoute(
+                            routeId = System.currentTimeMillis(),
+                            target = target,
+                            distanceMeters = route.distanceMeters,
+                            durationSeconds = route.durationSeconds,
+                            coordinates = route.coordinates
+                        )
+                    )
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                val statusCode = (error as? retrofit2.HttpException)?.code()
+                val useEnglishMessage = _uiState.value.selectedLanguage == "en"
+                val message = when (statusCode) {
+                    404 -> if (useEnglishMessage) "The routing API is unavailable on the server. Please update the server and try again." else "API định tuyến chưa có trên máy chủ. Vui lòng cập nhật máy chủ rồi thử lại."
+                    422 -> if (useEnglishMessage) "No drivable route was found to this pin." else "Không tìm thấy tuyến đường bộ đến pin này."
+                    503 -> if (useEnglishMessage) "The routing service is starting or temporarily unavailable. Please retry shortly." else "Dịch vụ tính tuyến đang khởi động hoặc tạm gián đoạn. Vui lòng thử lại sau."
+                    401 -> if (useEnglishMessage) "Your session has expired. Please sign in again." else "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
+                    else -> if (useEnglishMessage) "Could not calculate a route. Check your connection and try again." else "Chưa thể tính tuyến. Hãy kiểm tra kết nối rồi thử lại."
+                }
+                _uiState.update { it.copy(isCalculatingRoute = false, navigationError = message) }
+            }
+        }
+    }
+
+    fun recalculateNavigationRoute() {
+        val target = _uiState.value.navigationTarget ?: return
+        calculateRouteToPin(target.poiId, target.title, target.latitude, target.longitude)
+    }
+
+    fun clearNavigation() {
+        navigationJob?.cancel()
+        navigationJob = null
+        _uiState.update {
+            it.copy(
+                navigationTarget = null,
+                activeNavigationRoute = null,
+                isCalculatingRoute = false,
+                navigationError = null
+            )
+        }
+    }
+
     /**
      * Moves simulated GPS coordinates inside the selected POI's activation radius so the user
      * can test geofence AR unlock (`distance <= activationRadiusMeters + 20m`) from anywhere.
      */
     fun moveGpsNearPoi(poiLatitude: Double, poiLongitude: Double) {
+        if (!BuildConfig.DEBUG) return
         locationAndOrientationTracker.simulateLocationAndHeading(
             latitude = poiLatitude + 0.00008, // ~9 meters away
             longitude = poiLongitude + 0.00005
@@ -438,10 +534,27 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             targetLng
         )
 
-        if (liveDistance > radiusMeters + 20.0 && currentDetail?.isArUnlocked != true) {
+        if (!pose.hasFreshGpsFix || pose.isSimulatedLocation) {
             _uiState.update {
                 it.copy(
-                    errorMessage = "Bạn đang cách ${liveDistance.toInt()}m. Hãy di chuyển vào bán kính ${(radiusMeters + 20).toInt()}m của Pin (hoặc bấm 'Giả lập đến Pin') để mở Camera AR."
+                    errorMessage = if (lang.equals("en", ignoreCase = true)) {
+                        "Enable live GPS to open AR at this POI."
+                    } else {
+                        "Cần có tín hiệu GPS thực để mở AR tại địa điểm này. Hãy bật Vị trí và thử lại."
+                    }
+                )
+            }
+            return
+        }
+
+        if (liveDistance > radiusMeters + 20.0) {
+            _uiState.update {
+                it.copy(
+                    errorMessage = if (lang.equals("en", ignoreCase = true)) {
+                        "You are ${liveDistance.toInt()}m away. Move within ${(radiusMeters + 20).toInt()}m of this POI to open AR."
+                    } else {
+                        "Bạn đang cách ${liveDistance.toInt()}m. Hãy di chuyển vào bán kính ${(radiusMeters + 20).toInt()}m của điểm tham quan để mở Camera AR."
+                    }
                 )
             }
             return
@@ -467,7 +580,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         )
                     }
                     onUnlocked()
-                } else {
+                } else if (BuildConfig.DEBUG) {
                     val fallbackDetail = currentDetail ?: buildFallbackPoiDetail(poiId, pose.latitude, pose.longitude, lang)
                     _uiState.update {
                         it.copy(
@@ -487,8 +600,18 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         )
                     }
                     onUnlocked()
+                } else {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = response.error?.message ?: "Máy chủ không trả về dữ liệu AR.")
+                    }
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                if (!BuildConfig.DEBUG) {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = error.message ?: "Không thể tải dữ liệu AR từ máy chủ.")
+                    }
+                    return@launch
+                }
                 val fallbackDetail = currentDetail ?: buildFallbackPoiDetail(poiId, pose.latitude, pose.longitude, lang)
                 _uiState.update {
                     it.copy(
@@ -529,7 +652,11 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 if (response.success && response.data != null) {
                     _uiState.update { it.copy(poiCommunityPhotos = response.data) }
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                if (!BuildConfig.DEBUG) {
+                    _uiState.update { it.copy(errorMessage = error.message ?: "Không thể tải ảnh từ máy chủ.") }
+                    return@launch
+                }
                 val currentPhotos = _uiState.value.poiCommunityPhotos
                 val sorted = if (sortBy == "latest") {
                     currentPhotos.sortedByDescending { it.createdAt }
@@ -584,7 +711,16 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         )
                     }
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                if (!BuildConfig.DEBUG) {
+                    _uiState.update {
+                        it.copy(
+                            isUploadingPhoto = false,
+                            errorMessage = error.message ?: "Không thể tải ảnh lên máy chủ."
+                        )
+                    }
+                    return@launch
+                }
                 val currentUser = _uiState.value.currentUser
                 val localPhoto = CommunityPhotoDto(
                     id = "photo-local-${System.currentTimeMillis()}",
@@ -644,15 +780,10 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                     )
                     return@launch
                 }
-            } catch (_: Exception) {
-                // Fallback optimistic toggle below
+            } catch (error: Exception) {
+                _uiState.update { it.copy(errorMessage = error.message ?: "Không thể cập nhật lượt thích.") }
+                return@launch
             }
-            val existing = _uiState.value.poiCommunityPhotos.firstOrNull { it.id == photoId }
-                ?: _uiState.value.activeArContext?.highlightedCommunityPhotos?.firstOrNull { it.id == photoId }
-                ?: return@launch
-            val nextLiked = !existing.isLikedByCurrentUser
-            val nextCount = (existing.likeCount + if (nextLiked) 1 else -1).coerceAtLeast(0)
-            applyPhotoLikeUpdate(photoId, nextCount, nextLiked)
         }
     }
 
@@ -687,8 +818,9 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             try {
                 apiService.reportPhoto(photoId, ReportPhotoRequest(reason = reason, details = details))
-            } catch (_: Exception) {
-                // Handled gracefully
+            } catch (error: Exception) {
+                _uiState.update { it.copy(errorMessage = error.message ?: "Không thể gửi báo cáo ảnh.") }
+                return@launch
             }
             _uiState.update {
                 it.copy(statusBannerMessage = "Photo reported for Admin/SuperAdmin moderation.")
@@ -699,9 +831,14 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     fun deleteOwnPhoto(photoId: String) {
         viewModelScope.launch {
             try {
-                apiService.deleteOwnPhoto(photoId)
-            } catch (_: Exception) {
-                // Handled gracefully
+                val response = apiService.deleteOwnPhoto(photoId)
+                if (!response.isSuccessful) {
+                    _uiState.update { it.copy(errorMessage = "Không thể xóa ảnh (HTTP ${response.code()}).") }
+                    return@launch
+                }
+            } catch (error: Exception) {
+                _uiState.update { it.copy(errorMessage = error.message ?: "Không thể xóa ảnh.") }
+                return@launch
             }
             _uiState.update { state ->
                 val filterOut: (List<CommunityPhotoDto>) -> List<CommunityPhotoDto> = { list ->
@@ -734,11 +871,17 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        adminPois = poisResp.data ?: buildSeedAdminPois(),
-                        reportedPhotos = modResp.data ?: buildSeedReportedPhotos()
+                        adminPois = poisResp.data ?: emptyList(),
+                        reportedPhotos = modResp.data ?: emptyList()
                     )
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                if (!BuildConfig.DEBUG) {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = error.message ?: "Không thể tải dữ liệu quản trị.")
+                    }
+                    return@launch
+                }
                 val allSeed = buildSeedAdminPois()
                 val filtered = if (statusFilter.isNullOrBlank()) {
                     allSeed
@@ -771,18 +914,35 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 val response = apiService.createPoi(request)
                 val created = response.data
                 if (response.success && created != null) {
+                    val arCardError = createArCardsForPoi(created.id, request.arInfoCards)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             adminPois = listOf(created) + it.adminPois,
-                            statusBannerMessage = "POI '${created.titleVi.ifBlank { created.slug }}' submitted with status ${created.status} (Awaiting SuperAdmin Approval)."
+                            statusBannerMessage = if (arCardError == null) {
+                                "POI '${created.titleVi.ifBlank { created.slug }}' submitted with status ${created.status} (Awaiting SuperAdmin Approval)."
+                            } else {
+                                "POI '${created.titleVi.ifBlank { created.slug }}' was created, but its AR cards need to be retried."
+                            },
+                            errorMessage = arCardError
                         )
                     }
                     onSuccess()
                     return@launch
                 }
-            } catch (_: Exception) {
-                // Fallback local creation with PendingApproval status
+            } catch (error: Exception) {
+                if (!BuildConfig.DEBUG) {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = error.message ?: "Không thể tạo địa điểm.")
+                    }
+                    return@launch
+                }
+            }
+            if (!BuildConfig.DEBUG) {
+                _uiState.update {
+                    it.copy(isLoading = false, errorMessage = "Máy chủ không trả về địa điểm đã tạo.")
+                }
+                return@launch
             }
             val viTrans = request.translations.firstOrNull { it.languageCode == "vi" }
             val enTrans = request.translations.firstOrNull { it.languageCode == "en" }
@@ -813,6 +973,78 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
+    suspend fun createAdminArInfoCard(
+        poiId: String,
+        request: UpsertArInfoCardRequest
+    ): String? {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            return "Chỉ tài khoản Admin hoặc Super Admin mới được tạo thẻ AR."
+        }
+
+        return try {
+            val existingResponse = apiService.getAdminArInfoCards(poiId)
+            if (!existingResponse.success || existingResponse.data == null) {
+                return existingResponse.error?.message ?: "Không thể tải thứ tự các thẻ AR hiện có."
+            }
+            val nextDisplayOrder = (existingResponse.data.maxOfOrNull { it.displayOrder } ?: 0) + 1
+            val response = apiService.createArInfoCard(
+                poiId,
+                request.copy(displayOrder = nextDisplayOrder)
+            )
+            if (!response.isSuccessful) {
+                return "Không thể lưu thẻ AR (HTTP ${response.code()})."
+            }
+
+            _uiState.update { state ->
+                state.copy(
+                    adminPois = state.adminPois.map { poi ->
+                        if (poi.id == poiId) poi.copy(arInfoCardCount = poi.arInfoCardCount + 1) else poi
+                    },
+                    statusBannerMessage = "Đã tạo thẻ AR cố định cho địa điểm."
+                )
+            }
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.message ?: "Không thể tạo thẻ AR. Vui lòng thử lại."
+        }
+    }
+
+    private suspend fun createArCardsForPoi(poiId: String, inputs: List<ArInfoCardInputDto>): String? {
+        val cardGroups = inputs.groupBy {
+            listOf(it.azimuthDegrees, it.elevationMeters, it.anchorDistanceMeters, it.displayOrder)
+        }
+        for (group in cardGroups.values) {
+            val first = group.first()
+            val payload = UpsertArInfoCardRequest(
+                cardType = "HistoricalFact",
+                azimuthDegrees = first.azimuthDegrees,
+                distanceMeters = first.anchorDistanceMeters,
+                elevationMeters = first.elevationMeters,
+                displayOrder = first.displayOrder,
+                isActive = true,
+                localizations = group.distinctBy { it.languageCode.lowercase() }.map {
+                    ArCardLocalizationInputDto(
+                        languageCode = it.languageCode,
+                        title = it.title,
+                        subtitle = it.subtitle.ifBlank { null },
+                        content = it.bodyText
+                    )
+                }
+            )
+            try {
+                val response = apiService.createArInfoCard(poiId, payload)
+                if (!response.isSuccessful) {
+                    return "Địa điểm đã tạo nhưng lưu thẻ AR thất bại (HTTP ${response.code()})."
+                }
+            } catch (error: Exception) {
+                return "Địa điểm đã tạo nhưng lưu thẻ AR thất bại: ${error.message ?: "lỗi máy chủ"}"
+            }
+        }
+        return null
+    }
+
     /**
      * SuperAdmin ONLY: Approves a `PendingApproval` POI -> transitions to `Published`
      * and makes it immediately visible on the Tourist OpenFreeMap/Bright map within 50km.
@@ -829,9 +1061,16 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                apiService.approvePoi(poiId, ApprovePoiRequest(reviewNotes))
-            } catch (_: Exception) {
-                // Proceed to update UI state
+                val response = apiService.approvePoi(poiId)
+                if (!response.success || response.data == null) {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = response.error?.message ?: "Máy chủ không xác nhận phê duyệt.")
+                    }
+                    return@launch
+                }
+            } catch (error: Exception) {
+                _uiState.update { it.copy(isLoading = false, errorMessage = error.message ?: "Không thể phê duyệt địa điểm.") }
+                return@launch
             }
             _uiState.update { state ->
                 val updatedAdminList = state.adminPois.map { poi ->
@@ -904,9 +1143,16 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                apiService.rejectPoi(poiId, RejectPoiRequest(rejectionReason.trim()))
-            } catch (_: Exception) {
-                // Proceed to update state
+                val response = apiService.rejectPoi(poiId, RejectPoiRequest(rejectionReason.trim()))
+                if (!response.success || response.data == null) {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = response.error?.message ?: "Máy chủ không xác nhận từ chối địa điểm.")
+                    }
+                    return@launch
+                }
+            } catch (error: Exception) {
+                _uiState.update { it.copy(isLoading = false, errorMessage = error.message ?: "Không thể từ chối địa điểm.") }
+                return@launch
             }
             _uiState.update { state ->
                 val updatedList = state.adminPois.map { poi ->
@@ -932,12 +1178,23 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     fun moderateReportedPhoto(photoId: String, decision: String, notes: String? = null) {
         viewModelScope.launch {
             try {
-                apiService.moderatePhoto(
+                val response = apiService.moderatePhoto(
                     photoId = photoId,
-                    request = ModeratePhotoDecisionRequest(decision = decision, moderatorNotes = notes)
+                    request = ModeratePhotoDecisionRequest(
+                        decision = if (decision.equals("Keep", ignoreCase = true)) "Approve" else decision,
+                        moderatorNotes = notes,
+                        hardDeleteFromStorage = decision.equals("Remove", ignoreCase = true)
+                    )
                 )
-            } catch (_: Exception) {
-                // Handled gracefully
+                if (!response.success || response.data == null) {
+                    _uiState.update {
+                        it.copy(errorMessage = response.error?.message ?: "Máy chủ không xác nhận quyết định kiểm duyệt.")
+                    }
+                    return@launch
+                }
+            } catch (error: Exception) {
+                _uiState.update { it.copy(errorMessage = error.message ?: "Không thể gửi quyết định kiểm duyệt.") }
+                return@launch
             }
             _uiState.update { state ->
                 state.copy(
