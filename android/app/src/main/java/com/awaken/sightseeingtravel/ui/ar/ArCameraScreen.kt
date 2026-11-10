@@ -544,9 +544,9 @@ fun ArCameraScreen(
                 Column {
                     Text(
                         text = if (isEn) {
-                            "Your photo will be compressed (<=1920px, <=5MB), stored on Contabo Object Storage, and anchored at azimuth ${effectiveAzimuth.toInt()}°."
+                            "Your photo keeps its aspect ratio and is automatically resized to about 300 KB before upload, then stored on Contabo Object Storage at azimuth ${effectiveAzimuth.toInt()}°."
                         } else {
-                            "Ảnh được nén chuẩn JPEG (<=1920px, <=5MB), lưu trữ trên Contabo Object Storage và neo tại góc hướng ${effectiveAzimuth.toInt()}°."
+                            "Ảnh được giữ nguyên tỷ lệ, tự động scale còn khoảng 300 KB trước khi tải lên Contabo Object Storage và neo tại góc hướng ${effectiveAzimuth.toInt()}°."
                         },
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -922,7 +922,7 @@ private fun projectSpatialAnchorToScreen(
 
 /**
  * Captures a photo via CameraX `ImageCapture` to a temporary file in `cacheDir`
- * for subsequent JPEG compression (`<=1920px`, `<=5MB`) and Contabo S3 upload.
+ * for subsequent proportional JPEG compression to about 300 KB and Contabo S3 upload.
  */
 private fun capturePhotoToCacheFile(
     context: Context,

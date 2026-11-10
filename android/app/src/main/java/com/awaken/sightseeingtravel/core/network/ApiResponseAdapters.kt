@@ -186,10 +186,13 @@ internal object ApiResponseAdapters {
         override fun deserialize(json: JsonElement, typeOfT: Type, context: JsonDeserializationContext): AdminPoiDto {
             val value = json.asObjectOrThrow(typeOfT)
             val localizations = value["localizations"]?.takeIf { it.isJsonArray }?.asJsonArray
-                ?.mapNotNull { it.asObjectOrNull() }
+                ?.mapNotNull { localization ->
+                    localization.takeUnless { it.isJsonNull }
+                        ?.let { context.deserialize<PoiTranslationInputDto>(it, PoiTranslationInputDto::class.java) }
+                }
                 .orEmpty()
-            val vi = localizations.firstOrNull { it.string("languageCode").equals("vi", true) }
-            val en = localizations.firstOrNull { it.string("languageCode").equals("en", true) }
+            val vi = localizations.firstOrNull { it.languageCode.equals("vi", true) }
+            val en = localizations.firstOrNull { it.languageCode.equals("en", true) }
             val fallback = localizations.firstOrNull()
             return AdminPoiDto(
                 id = value.string("id"),
@@ -203,11 +206,13 @@ internal object ApiResponseAdapters {
                 createdByAdminName = value.string("createdByAdminName", "createdBy", default = "Admin"),
                 approvedBySuperAdminName = value.nullableString("approvedBySuperAdminName", "approvedBy"),
                 updatedAt = value.string("updatedAt", "createdAt"),
-                titleVi = vi?.string("name") ?: fallback?.string("name").orEmpty(),
-                titleEn = en?.string("name") ?: fallback?.string("name").orEmpty(),
-                shortSummaryVi = vi?.string("shortSummary").orEmpty(),
-                shortSummaryEn = en?.string("shortSummary").orEmpty(),
-                arInfoCardCount = value.int("arInfoCardCount")
+                titleVi = vi?.title ?: fallback?.title.orEmpty(),
+                titleEn = en?.title ?: fallback?.title.orEmpty(),
+                shortSummaryVi = vi?.shortSummary.orEmpty(),
+                shortSummaryEn = en?.shortSummary.orEmpty(),
+                arInfoCardCount = value.int("arInfoCardCount"),
+                coverImageUrl = value.nullableString("coverImageUrl"),
+                localizations = localizations
             )
         }
     }

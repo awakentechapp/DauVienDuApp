@@ -15,9 +15,10 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
-import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * Retrofit2 Service matching the locked `/api/v1` Backend API contract.
@@ -138,6 +139,13 @@ interface SightseeingApiService {
         @Body request: CreateOrUpdatePoiRequest
     ): ApiEnvelope<AdminPoiDto>
 
+    @Multipart
+    @POST("api/v1/admin/pois/{poiId}/cover")
+    suspend fun uploadPoiCoverImage(
+        @Path("poiId") poiId: String,
+        @Part file: MultipartBody.Part
+    ): Response<AdminPoiDto>
+
     @GET("api/v1/admin/pois/{poiId}/ar-cards")
     suspend fun getAdminArInfoCards(
         @Path("poiId") poiId: String
@@ -148,6 +156,12 @@ interface SightseeingApiService {
         @Path("poiId") poiId: String,
         @Body request: UpsertArInfoCardRequest
     ): retrofit2.Response<ResponseBody>
+
+    @PUT("api/v1/admin/ar-cards/{cardId}")
+    suspend fun updateArInfoCard(
+        @Path("cardId") cardId: String,
+        @Body request: UpsertArInfoCardRequest
+    ): Response<AdminArInfoCardDto>
 
     /**
      * SuperAdmin ONLY: Approves a `PendingApproval` POI and sets status to `Published`
@@ -189,8 +203,8 @@ internal interface SyncTokenRefreshApi {
  */
 object SightseeingNetworkModule {
 
-    private const val MAX_PHOTO_DIMENSION_PX = 1920
-    private const val MAX_PHOTO_BYTES = 5 * 1024 * 1024 // 5 MB
+    private const val TARGET_PHOTO_BYTES = 300 * 1024 // 300 KiB
+    private const val MAX_DECODED_PHOTO_PIXELS = 4_000_000L
 
     fun createApiService(tokenStore: TokenStore): SightseeingApiService {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
@@ -278,7 +292,7 @@ object SightseeingNetworkModule {
     }
 
     /**
-     * Compresses a captured photo file into JPEG (`<= 1920px` longest edge and `<= 5MB`)
+     * Compresses a captured photo file into JPEG (about 300 KB, preserving its aspect ratio)
      * and constructs multipart parts for `POST /api/v1/pois/{poiId}/photos`.
      */
     fun buildPhotoUploadMultipart(
@@ -288,7 +302,7 @@ object SightseeingNetworkModule {
         azimuthDegrees: Float,
         caption: String
     ): PhotoMultipartPayload {
-        val compressedBytes = compressJpegWithinLimits(photoFile)
+        val compressedBytes = compressJpegAround300Kb(photoFile)
         val fileBody = compressedBytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
         val filePart = MultipartBody.Part.createFormData(
             "file",
@@ -305,39 +319,68 @@ object SightseeingNetworkModule {
         )
     }
 
-    private fun compressJpegWithinLimits(sourceFile: File): ByteArray {
+    fun buildPoiCoverUploadPart(photoFile: File): MultipartBody.Part {
+        val compressedBytes = compressJpegAround300Kb(photoFile)
+        val fileBody = compressedBytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
+        return MultipartBody.Part.createFormData(
+            "file",
+            "poi_cover_${System.currentTimeMillis()}.jpg",
+            fileBody
+        )
+    }
+
+    private fun compressJpegAround300Kb(sourceFile: File): ByteArray {
+        if (!sourceFile.isFile || !sourceFile.canRead()) {
+            throw IOException("Không thể đọc ảnh vừa chụp.")
+        }
+
         val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(sourceFile.absolutePath, boundsOptions)
+        if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
+            throw IOException("Ảnh vừa chụp không hợp lệ hoặc không thể giải mã.")
+        }
 
         var sampleSize = 1
-        val maxSourceSide = max(boundsOptions.outWidth, boundsOptions.outHeight)
-        if (maxSourceSide > MAX_PHOTO_DIMENSION_PX) {
-            sampleSize = max(1, (maxSourceSide.toFloat() / MAX_PHOTO_DIMENSION_PX).roundToInt())
+        while (
+            (boundsOptions.outWidth.toLong() / sampleSize) *
+                (boundsOptions.outHeight.toLong() / sampleSize) > MAX_DECODED_PHOTO_PIXELS
+        ) {
+            sampleSize *= 2
         }
 
-        val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-        val decoded = BitmapFactory.decodeFile(sourceFile.absolutePath, decodeOptions)
-            ?: return sourceFile.readBytes()
-
-        val longestSide = max(decoded.width, decoded.height)
-        val scaledBitmap = if (longestSide > MAX_PHOTO_DIMENSION_PX) {
-            val ratio = MAX_PHOTO_DIMENSION_PX.toFloat() / longestSide.toFloat()
-            val targetW = (decoded.width * ratio).roundToInt().coerceAtLeast(1)
-            val targetH = (decoded.height * ratio).roundToInt().coerceAtLeast(1)
-            Bitmap.createScaledBitmap(decoded, targetW, targetH, true)
-        } else {
-            decoded
-        }
-
-        var quality = 88
+        var bitmap = BitmapFactory.decodeFile(
+            sourceFile.absolutePath,
+            BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        ) ?: throw IOException("Không thể giải mã ảnh vừa chụp.")
         val output = ByteArrayOutputStream()
-        do {
-            output.reset()
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, output)
-            quality -= 8
-        } while (output.size() > MAX_PHOTO_BYTES && quality >= 40)
+        try {
+            while (true) {
+                for (quality in intArrayOf(88, 80, 72, 64, 56, 48, 40)) {
+                    output.reset()
+                    if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, output)) {
+                        throw IOException("Không thể nén ảnh vừa chụp.")
+                    }
+                    if (output.size() <= TARGET_PHOTO_BYTES) {
+                        return output.toByteArray()
+                    }
+                }
 
-        return output.toByteArray()
+                val sizeRatio = sqrt(TARGET_PHOTO_BYTES.toDouble() / output.size().toDouble())
+                val scale = (sizeRatio * 0.9).toFloat().coerceIn(0.25f, 0.85f)
+                val targetWidth = (bitmap.width * scale).roundToInt().coerceAtLeast(1)
+                val targetHeight = (bitmap.height * scale).roundToInt().coerceAtLeast(1)
+                if (targetWidth == bitmap.width && targetHeight == bitmap.height) {
+                    throw IOException("Không thể nén ảnh xuống khoảng 300 KB.")
+                }
+
+                val resized = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+                if (resized !== bitmap) bitmap.recycle()
+                bitmap = resized
+            }
+        } finally {
+            if (!bitmap.isRecycled) bitmap.recycle()
+            output.close()
+        }
     }
 }
 

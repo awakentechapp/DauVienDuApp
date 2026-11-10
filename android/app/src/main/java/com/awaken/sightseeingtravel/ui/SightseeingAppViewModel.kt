@@ -1,6 +1,7 @@
 package com.awaken.sightseeingtravel.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.awaken.sightseeingtravel.BuildConfig
@@ -10,10 +11,17 @@ import com.awaken.sightseeingtravel.core.network.SightseeingNetworkModule
 import com.awaken.sightseeingtravel.core.network.TokenStore
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import retrofit2.HttpException
 import java.io.File
 
 /**
@@ -37,6 +45,7 @@ data class SightseeingUiState(
     val poiCommunityPhotos: List<CommunityPhotoDto> = emptyList(),
     val photoSortBy: String = "popular", // "popular" or "latest"
     val adminPois: List<AdminPoiDto> = emptyList(),
+    val adminArCardsByPoi: Map<String, List<AdminArInfoCardDto>> = emptyMap(),
     val adminStatusFilter: String? = null,
     val reportedPhotos: List<ModerationPhotoItemDto> = emptyList()
 )
@@ -776,13 +785,15 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             _uiState.update { it.copy(isUploadingPhoto = true, errorMessage = null) }
             try {
-                val multipart = SightseeingNetworkModule.buildPhotoUploadMultipart(
-                    photoFile = photoFile,
-                    capturedLatitude = pose.latitude,
-                    capturedLongitude = pose.longitude,
-                    azimuthDegrees = pose.azimuthDegrees,
-                    caption = caption
-                )
+                val multipart = withContext(Dispatchers.IO) {
+                    SightseeingNetworkModule.buildPhotoUploadMultipart(
+                        photoFile = photoFile,
+                        capturedLatitude = pose.latitude,
+                        capturedLongitude = pose.longitude,
+                        azimuthDegrees = pose.azimuthDegrees,
+                        caption = caption
+                    )
+                }
                 val response = apiService.uploadCommunityPhoto(
                     poiId = poiId,
                     file = multipart.filePart,
@@ -809,44 +820,32 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         )
                     }
                 }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
-                if (!BuildConfig.DEBUG) {
-                    _uiState.update {
-                        it.copy(
-                            isUploadingPhoto = false,
-                            errorMessage = error.message ?: "Không thể tải ảnh lên máy chủ."
-                        )
-                    }
-                    return@launch
-                }
-                val currentUser = _uiState.value.currentUser
-                val localPhoto = CommunityPhotoDto(
-                    id = "photo-local-${System.currentTimeMillis()}",
-                    poiId = poiId,
-                    authorId = currentUser?.id ?: "usr-testapp",
-                    authorDisplayName = currentUser?.displayName ?: "Du Khách (testapp)",
-                    imageUrl = photoFile.toURI().toString(),
-                    thumbnailUrl = photoFile.toURI().toString(),
-                    caption = caption.ifBlank { "Captured at POI" },
-                    capturedLatitude = pose.latitude,
-                    capturedLongitude = pose.longitude,
-                    azimuthDegrees = pose.azimuthDegrees,
-                    elevationMeters = 1.6f,
-                    likeCount = 1,
-                    isLikedByCurrentUser = true,
-                    isHighlightedInAr = true,
-                    createdAt = "Just now"
-                )
-                appendNewPhotoToState(localPhoto)
                 _uiState.update {
                     it.copy(
                         isUploadingPhoto = false,
-                        statusBannerMessage = "Đã chụp & ghim ảnh vào không gian AR ở góc ${pose.azimuthDegrees.toInt()}°!"
+                        errorMessage = photoUploadErrorMessage(error)
                     )
                 }
-                onSuccess()
             }
         }
+    }
+
+    private fun photoUploadErrorMessage(error: Exception): String {
+        val httpError = error as? HttpException
+            ?: return error.message ?: "Không thể tải ảnh lên máy chủ."
+        val responseBody = runCatching { httpError.response()?.errorBody()?.string() }.getOrNull()
+        val serverMessage = runCatching {
+            val problem = JSONObject(responseBody.orEmpty())
+            problem.optString("detail")
+                .ifBlank { problem.optString("message") }
+                .ifBlank { problem.optString("title") }
+        }.getOrNull()
+
+        return serverMessage?.takeIf { it.isNotBlank() }
+            ?: "Tải ảnh lên thất bại (HTTP ${httpError.code()})."
     }
 
     private fun appendNewPhotoToState(newPhoto: CommunityPhotoDto) {
@@ -966,10 +965,28 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             try {
                 val poisResp = apiService.getAdminPois(statusFilter)
                 val modResp = apiService.getReportedPhotos()
+                val loadedPois = poisResp.data ?: emptyList()
+                val cardsByPoi = coroutineScope {
+                    loadedPois.map { poi ->
+                        async {
+                            val cards = try {
+                                apiService.getAdminArInfoCards(poi.id).data.orEmpty()
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                            poi.id to cards
+                        }
+                    }.awaitAll().toMap()
+                }
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        adminPois = poisResp.data ?: emptyList(),
+                        adminPois = loadedPois.map { poi ->
+                            poi.copy(arInfoCardCount = cardsByPoi[poi.id]?.size ?: poi.arInfoCardCount)
+                        },
+                        adminArCardsByPoi = cardsByPoi,
                         reportedPhotos = modResp.data ?: emptyList()
                     )
                 }
@@ -990,6 +1007,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                     it.copy(
                         isLoading = false,
                         adminPois = filtered,
+                        adminArCardsByPoi = emptyMap(),
                         reportedPhotos = buildSeedReportedPhotos()
                     )
                 }
@@ -1004,6 +1022,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
      */
     fun createPoiAsAdmin(
         request: CreateOrUpdatePoiRequest,
+        coverImageUri: Uri? = null,
         onSuccess: () -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -1012,17 +1031,39 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 val response = apiService.createPoi(request)
                 val created = response.data
                 if (response.success && created != null) {
-                    val arCardError = createArCardsForPoi(created.id, request.arInfoCards)
+                    val createdPoi: AdminPoiDto = created
+                    val createdPoiId = createdPoi.id
+                    val arCardError = createArCardsForPoi(createdPoiId, request.arInfoCards)
+                    var savedPoi: AdminPoiDto = createdPoi
+                    var coverError: String? = null
+                    if (coverImageUri != null) {
+                        try {
+                            savedPoi = uploadPoiCover(createdPoiId, coverImageUri)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            coverError = "Địa điểm đã tạo nhưng ảnh thumbnail chưa tải lên: ${error.message ?: "lỗi máy chủ"}"
+                        }
+                    }
+                    val cards = try {
+                        apiService.getAdminArInfoCards(createdPoiId).data.orEmpty()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    val followUpError = listOfNotNull(coverError, arCardError).joinToString("\n").ifBlank { null }
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            adminPois = listOf(created) + it.adminPois,
-                            statusBannerMessage = if (arCardError == null) {
-                                "POI '${created.titleVi.ifBlank { created.slug }}' submitted with status ${created.status} (Awaiting SuperAdmin Approval)."
+                            adminPois = listOf(savedPoi.copy(arInfoCardCount = cards.size)) + it.adminPois,
+                            adminArCardsByPoi = it.adminArCardsByPoi + (createdPoiId to cards),
+                            statusBannerMessage = if (followUpError == null) {
+                                "POI '${savedPoi.titleFor("vi")}' submitted with status ${savedPoi.status} (Awaiting SuperAdmin Approval)."
                             } else {
-                                "POI '${created.titleVi.ifBlank { created.slug }}' was created, but its AR cards need to be retried."
+                                "POI '${savedPoi.titleFor("vi")}' was created; review the upload warning below."
                             },
-                            errorMessage = arCardError
+                            errorMessage = followUpError
                         )
                     }
                     onSuccess()
@@ -1058,7 +1099,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 titleEn = enTrans?.title ?: request.slug,
                 shortSummaryVi = viTrans?.shortSummary.orEmpty(),
                 shortSummaryEn = enTrans?.shortSummary.orEmpty(),
-                arInfoCardCount = request.arInfoCards.size
+                arInfoCardCount = request.arInfoCards.size,
+                localizations = request.translations
             )
             _uiState.update {
                 it.copy(
@@ -1093,10 +1135,23 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 return "Không thể lưu thẻ AR (HTTP ${response.code()})."
             }
 
+            val refreshedCards = apiService.getAdminArInfoCards(poiId).data ?:
+                (existingResponse.data + AdminArInfoCardDto(
+                    id = "pending-${System.currentTimeMillis()}",
+                    poiId = poiId,
+                    cardType = request.cardType,
+                    azimuthDegrees = request.azimuthDegrees.toDouble(),
+                    distanceMeters = request.distanceMeters.toDouble(),
+                    elevationMeters = request.elevationMeters.toDouble(),
+                    displayOrder = nextDisplayOrder,
+                    isActive = request.isActive,
+                    localizations = request.localizations
+                ))
             _uiState.update { state ->
                 state.copy(
+                    adminArCardsByPoi = state.adminArCardsByPoi + (poiId to refreshedCards),
                     adminPois = state.adminPois.map { poi ->
-                        if (poi.id == poiId) poi.copy(arInfoCardCount = poi.arInfoCardCount + 1) else poi
+                        if (poi.id == poiId) poi.copy(arInfoCardCount = refreshedCards.size) else poi
                     },
                     statusBannerMessage = "Đã tạo thẻ AR cố định cho địa điểm."
                 )
@@ -1106,6 +1161,100 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             throw error
         } catch (error: Exception) {
             error.message ?: "Không thể tạo thẻ AR. Vui lòng thử lại."
+        }
+    }
+
+    suspend fun updateAdminArInfoCard(
+        cardId: String,
+        request: UpsertArInfoCardRequest
+    ): String? {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            return "Chỉ tài khoản Admin hoặc Super Admin mới được chỉnh sửa thẻ AR."
+        }
+
+        return try {
+            val response = apiService.updateArInfoCard(cardId, request)
+            if (!response.isSuccessful) return "Không thể cập nhật thẻ AR (HTTP ${response.code()})."
+            val updatedCard = response.body() ?: return "Máy chủ không trả về thẻ AR đã cập nhật."
+            _uiState.update { state ->
+                val cards = (state.adminArCardsByPoi[updatedCard.poiId].orEmpty()
+                    .filterNot { it.id == cardId } + updatedCard)
+                    .sortedBy { it.displayOrder }
+                state.copy(
+                    adminArCardsByPoi = state.adminArCardsByPoi + (updatedCard.poiId to cards),
+                    adminPois = state.adminPois.map { poi ->
+                        if (poi.id == updatedCard.poiId) poi.copy(arInfoCardCount = cards.size) else poi
+                    },
+                    statusBannerMessage = "Đã cập nhật thẻ AR."
+                )
+            }
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.message ?: "Không thể cập nhật thẻ AR. Vui lòng thử lại."
+        }
+    }
+
+    fun updatePoiAsAdmin(
+        poiId: String,
+        request: CreateOrUpdatePoiRequest,
+        coverImageUri: Uri? = null,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            try {
+                val response = apiService.updatePoi(poiId, request)
+                var updatedPoi = response.data
+                    ?: throw IllegalStateException(response.error?.message ?: "Máy chủ không trả về POI đã cập nhật.")
+                if (coverImageUri != null) {
+                    updatedPoi = uploadPoiCover(poiId, coverImageUri)
+                }
+                _uiState.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        adminPois = state.adminPois.map { if (it.id == poiId) updatedPoi.copy(
+                            arInfoCardCount = state.adminArCardsByPoi[poiId]?.size ?: it.arInfoCardCount
+                        ) else it },
+                        statusBannerMessage = "Đã cập nhật POI '${updatedPoi.titleFor("vi")}'."
+                    )
+                }
+                onSuccess()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _uiState.update {
+                    it.copy(isLoading = false, errorMessage = error.message ?: "Không thể cập nhật POI.")
+                }
+            }
+        }
+    }
+
+    private suspend fun uploadPoiCover(poiId: String, uri: Uri): AdminPoiDto {
+        val imageFile = withContext(Dispatchers.IO) {
+            val file = File(getApplication<Application>().cacheDir, "poi-cover-${System.currentTimeMillis()}.jpg")
+            try {
+                val input = getApplication<Application>().contentResolver.openInputStream(uri)
+                    ?: throw IllegalArgumentException("Không thể mở ảnh đã chọn.")
+                input.use { source -> file.outputStream().use(source::copyTo) }
+                file
+            } catch (error: Exception) {
+                file.delete()
+                throw error
+            }
+        }
+        return try {
+            val part = withContext(Dispatchers.IO) {
+                SightseeingNetworkModule.buildPoiCoverUploadPart(imageFile)
+            }
+            val response = apiService.uploadPoiCoverImage(poiId, part)
+            if (!response.isSuccessful) {
+                throw IllegalStateException("Không thể tải ảnh thumbnail lên (HTTP ${response.code()}).")
+            }
+            response.body() ?: throw IllegalStateException("Máy chủ không trả về POI sau khi tải ảnh.")
+        } finally {
+            imageFile.delete()
         }
     }
 

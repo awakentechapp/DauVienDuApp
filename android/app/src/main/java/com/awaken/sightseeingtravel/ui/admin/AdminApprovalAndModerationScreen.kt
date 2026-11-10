@@ -1,5 +1,8 @@
 package com.awaken.sightseeingtravel.ui.admin
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,9 +48,12 @@ fun AdminApprovalAndModerationScreen(
     hasFreshGpsFix: Boolean,
     gpsAccuracyMeters: Float,
     currentAzimuthDegrees: Float,
+    adminArCardsByPoi: Map<String, List<AdminArInfoCardDto>>,
     onCreateFixedArCard: suspend (String, UpsertArInfoCardRequest) -> String?,
+    onUpdateArInfoCard: suspend (String, UpsertArInfoCardRequest) -> String?,
     onFilterStatusChange: (String?) -> Unit,
-    onCreatePoiSubmit: (CreateOrUpdatePoiRequest) -> Unit,
+    onCreatePoiSubmit: (CreateOrUpdatePoiRequest, Uri?) -> Unit,
+    onUpdatePoiSubmit: (String, CreateOrUpdatePoiRequest, Uri?) -> Unit,
     onSuperAdminApprovePoi: (String, String) -> Unit,
     onSuperAdminRejectPoi: (String, String) -> Unit,
     onModeratePhotoDecision: (String, String, String?) -> Unit,
@@ -56,7 +62,9 @@ fun AdminApprovalAndModerationScreen(
     val isSuperAdmin = currentUser?.isSuperAdmin == true
     var activeTabIndex by remember { mutableIntStateOf(0) }
     var showCreatePoiDialog by remember { mutableStateOf(false) }
+    var poiForEdit by remember { mutableStateOf<AdminPoiDto?>(null) }
     var poiForFixedArCard by remember { mutableStateOf<AdminPoiDto?>(null) }
+    var arCardForEdit by remember { mutableStateOf<AdminArInfoCardDto?>(null) }
     var poiIdPendingRejection by remember { mutableStateOf<AdminPoiDto?>(null) }
     var rejectionReasonInput by remember { mutableStateOf("") }
 
@@ -124,6 +132,8 @@ fun AdminApprovalAndModerationScreen(
                     isSuperAdmin = isSuperAdmin,
                     adminPois = adminPois,
                     selectedStatusFilter = selectedStatusFilter,
+                    selectedLanguage = selectedLanguage,
+                    adminArCardsByPoi = adminArCardsByPoi,
                     onFilterStatusChange = onFilterStatusChange,
                     onApproveClick = { poi ->
                         onSuperAdminApprovePoi(poi.id, "Verified & approved by SuperAdmin")
@@ -132,7 +142,9 @@ fun AdminApprovalAndModerationScreen(
                         poiIdPendingRejection = poi
                         rejectionReasonInput = ""
                     },
-                    onCreateFixedArCard = { poi -> poiForFixedArCard = poi }
+                    onCreateFixedArCard = { poi -> poiForFixedArCard = poi },
+                    onEditPoi = { poi -> poiForEdit = poi },
+                    onEditArCard = { card -> arCardForEdit = card }
                 )
             } else {
                 ReportedPhotoModerationTab(
@@ -154,9 +166,25 @@ fun AdminApprovalAndModerationScreen(
             gpsAccuracyMeters = gpsAccuracyMeters,
             currentAzimuthDegrees = currentAzimuthDegrees,
             onDismiss = { showCreatePoiDialog = false },
-            onSubmit = { request ->
+            onSubmit = { request, coverImageUri ->
                 showCreatePoiDialog = false
-                onCreatePoiSubmit(request)
+                onCreatePoiSubmit(request, coverImageUri)
+            }
+        )
+    }
+
+    poiForEdit?.let { poi ->
+        CreatePoiDialog(
+            initialPoi = poi,
+            defaultLatitude = defaultLatitude,
+            defaultLongitude = defaultLongitude,
+            hasFreshGpsFix = hasFreshGpsFix,
+            gpsAccuracyMeters = gpsAccuracyMeters,
+            currentAzimuthDegrees = currentAzimuthDegrees,
+            onDismiss = { poiForEdit = null },
+            onSubmit = { request, coverImageUri ->
+                poiForEdit = null
+                onUpdatePoiSubmit(poi.id, request, coverImageUri)
             }
         )
     }
@@ -172,6 +200,15 @@ fun AdminApprovalAndModerationScreen(
             currentAzimuthDegrees = currentAzimuthDegrees,
             onDismiss = { poiForFixedArCard = null },
             onSubmit = onCreateFixedArCard
+        )
+    }
+
+    arCardForEdit?.let { card ->
+        EditArInfoCardDialog(
+            card = card,
+            selectedLanguage = selectedLanguage,
+            onDismiss = { arCardForEdit = null },
+            onSubmit = onUpdateArInfoCard
         )
     }
 
@@ -231,11 +268,15 @@ fun AdminApprovalAndModerationScreen(
 private fun PoiApprovalWorkflowTab(
     isSuperAdmin: Boolean,
     adminPois: List<AdminPoiDto>,
+    selectedLanguage: String,
+    adminArCardsByPoi: Map<String, List<AdminArInfoCardDto>>,
     selectedStatusFilter: String?,
     onFilterStatusChange: (String?) -> Unit,
     onApproveClick: (AdminPoiDto) -> Unit,
     onRejectClick: (AdminPoiDto) -> Unit,
-    onCreateFixedArCard: (AdminPoiDto) -> Unit
+    onCreateFixedArCard: (AdminPoiDto) -> Unit,
+    onEditPoi: (AdminPoiDto) -> Unit,
+    onEditArCard: (AdminArInfoCardDto) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Role explanation banner
@@ -296,6 +337,8 @@ private fun PoiApprovalWorkflowTab(
             modifier = Modifier.fillMaxSize()
         ) {
             items(adminPois, key = { it.id }) { poi ->
+                val poiArCards = adminArCardsByPoi[poi.id].orEmpty()
+                val arCardCount = adminArCardsByPoi[poi.id]?.size ?: poi.arInfoCardCount
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -309,7 +352,7 @@ private fun PoiApprovalWorkflowTab(
                         ) {
                             StatusBadge(status = poi.parsedStatus)
                             Text(
-                                text = "Radius: ${poi.activationRadiusMeters.toInt()}m • ${poi.arInfoCardCount} AR Cards",
+                                text = "Radius: ${poi.activationRadiusMeters.toInt()}m • $arCardCount AR Cards",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -318,13 +361,13 @@ private fun PoiApprovalWorkflowTab(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = poi.titleVi.ifBlank { poi.slug },
+                            text = poi.titleFor("vi"),
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
-                        if (poi.titleEn.isNotBlank()) {
+                        if (poi.titleFor("en").isNotBlank() && poi.titleFor("en") != poi.titleFor("vi")) {
                             Text(
-                                text = "EN: ${poi.titleEn}",
+                                text = "EN: ${poi.titleFor("en")}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -333,7 +376,7 @@ private fun PoiApprovalWorkflowTab(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = poi.shortSummaryVi.ifBlank { poi.shortSummaryEn },
+                            text = poi.summaryFor(selectedLanguage),
                             style = MaterialTheme.typography.bodyMedium
                         )
 
@@ -361,13 +404,47 @@ private fun PoiApprovalWorkflowTab(
                             }
                         }
 
-                        OutlinedButton(
-                            onClick = { onCreateFixedArCard(poi) },
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(if (isSuperAdmin) "Tạo thẻ AR cố định" else "Tạo thẻ AR cố định tại POI")
+                            OutlinedButton(
+                                onClick = { onEditPoi(poi) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Chỉnh sửa", fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { onCreateFixedArCard(poi) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Tạo thẻ AR", fontSize = 12.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("Thẻ AR của POI ($arCardCount)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        if (poiArCards.isEmpty()) {
+                            Text(
+                                text = if (adminArCardsByPoi.containsKey(poi.id)) "Chưa có thẻ AR." else "Danh sách thẻ AR chưa tải được.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            poiArCards.sortedBy { it.displayOrder }.forEach { arCard ->
+                                ArInfoCardAdminItem(
+                                    card = arCard,
+                                    selectedLanguage = selectedLanguage,
+                                    onEdit = { onEditArCard(arCard) }
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
                         }
 
                         if (poi.parsedStatus == PoiStatus.PENDING_APPROVAL) {
@@ -409,6 +486,53 @@ private fun PoiApprovalWorkflowTab(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ArInfoCardAdminItem(
+    card: AdminArInfoCardDto,
+    selectedLanguage: String,
+    onEdit: () -> Unit
+) {
+    val vi = card.localizations.firstOrNull { it.languageCode.equals("vi", true) }
+    val en = card.localizations.firstOrNull { it.languageCode.equals("en", true) }
+    val primary = if (selectedLanguage.equals("en", true)) en ?: vi else vi ?: en
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = primary?.title ?: "Thẻ AR ${card.displayOrder}",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    )
+                    if (vi != null && en != null) {
+                        Text("EN: ${en.title}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Sửa")
+                }
+            }
+            if (vi != null) {
+                Text("VI: ${vi.content}", style = MaterialTheme.typography.bodySmall)
+            }
+            if (en != null) {
+                Text("EN: ${en.content}", style = MaterialTheme.typography.bodySmall)
+            }
+            Text(
+                text = "${card.cardType} • ${card.azimuthDegrees.roundToInt()}° • ${card.distanceMeters.roundToInt()}m • ${card.elevationMeters}m • ${if (card.isActive) "Đang bật" else "Đang tắt"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -517,6 +641,14 @@ private fun StatusBadge(status: PoiStatus) {
     }
 }
 
+private data class CapturedArPlacement(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float,
+    val azimuthDegrees: Float,
+    val distanceMeters: Double
+)
+
 @Composable
 private fun CreateFixedArCardDialog(
     poi: AdminPoiDto,
@@ -540,6 +672,7 @@ private fun CreateFixedArCardDialog(
     var elevationText by remember { mutableStateOf("1.5") }
     var isSubmitting by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var capturedPlacement by remember(poi.id) { mutableStateOf<CapturedArPlacement?>(null) }
 
     val distanceToPoi = LocationAndOrientationTracker.calculateDistanceMeters(
         currentLatitude,
@@ -548,12 +681,13 @@ private fun CreateFixedArCardDialog(
         poi.longitude
     )
     val isAtPoi = hasFreshGpsFix && distanceToPoi <= poi.activationRadiusMeters + 20.0
+    val canCapturePlacement = isAtPoi && distanceToPoi <= 50.0
     val azimuth = azimuthText.replace(',', '.').toDoubleOrNull()
     val anchorDistance = distanceText.replace(',', '.').toDoubleOrNull()
     val elevation = elevationText.replace(',', '.').toDoubleOrNull()
     val hasContent = (titleVi.isNotBlank() || titleEn.isNotBlank()) &&
         (contentVi.isNotBlank() || contentEn.isNotBlank())
-    val canSubmit = isAtPoi && hasContent && azimuth != null && azimuth in 0.0..360.0 &&
+    val canSubmit = capturedPlacement != null && hasContent && azimuth != null && azimuth in 0.0..360.0 &&
         anchorDistance != null && anchorDistance in 1.0..50.0 &&
         elevation != null && elevation in -5.0..20.0 && !isSubmitting
 
@@ -577,16 +711,85 @@ private fun CreateFixedArCardDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = if (isAtPoi) {
-                        if (isEn) "At POI • GPS accuracy ±${gpsAccuracyMeters.roundToInt()}m • ${distanceToPoi.roundToInt()}m from pin"
-                        else "Đang ở trong vùng POI • GPS ±${gpsAccuracyMeters.roundToInt()}m • Cách pin ${distanceToPoi.roundToInt()}m"
+                    text = capturedPlacement?.let { placement ->
+                        if (isEn) "AR position saved • GPS ±${placement.accuracyMeters.roundToInt()}m • ${placement.distanceMeters.roundToInt()}m from POI. You can move away and finish entering the card."
+                        else "Đã lưu vị trí AR • GPS ±${placement.accuracyMeters.roundToInt()}m • cách POI ${placement.distanceMeters.roundToInt()}m. Bạn có thể rời vị trí và nhập nội dung tiếp."
+                    } ?: if (canCapturePlacement) {
+                        if (isEn) "Stand at the intended AR position, then save it here. You can move away after the position is captured."
+                        else "Đứng tại vị trí muốn đặt AR rồi lưu vị trí bên dưới. Sau khi lưu, bạn có thể rời đi để nhập dữ liệu."
+                    } else if (!hasFreshGpsFix) {
+                        if (isEn) "Waiting for an accurate live GPS fix before saving an AR position."
+                        else "Cần GPS thực đủ chính xác trước khi lưu vị trí AR."
+                    } else if (distanceToPoi > 50.0) {
+                        if (isEn) "The AR position must be within 50m of this POI."
+                        else "Vị trí AR cần nằm trong phạm vi 50m quanh POI này."
                     } else {
-                        if (isEn) "Get an accurate live GPS fix and stand within ${ (poi.activationRadiusMeters + 20).roundToInt() }m of this POI to pin an AR card."
-                        else "Cần GPS thực đủ chính xác và đứng trong phạm vi ${(poi.activationRadiusMeters + 20).roundToInt()}m của POI để ghim thẻ AR."
+                        if (isEn) "Move inside the active area of this POI to save an AR position."
+                        else "Hãy vào vùng hoạt động của POI để lưu vị trí AR."
                     },
-                    color = if (isAtPoi) Color(0xFF15803D) else Color(0xFFB45309),
+                    color = if (capturedPlacement != null || canCapturePlacement) Color(0xFF15803D) else Color(0xFFB45309),
                     style = MaterialTheme.typography.bodySmall
                 )
+                FilledTonalButton(
+                    onClick = {
+                        val placementDistance = distanceToPoi.coerceIn(1.0, 50.0)
+                        val placementAzimuth = if (distanceToPoi < 1.0) {
+                            ((currentAzimuthDegrees % 360f) + 360f) % 360f
+                        } else {
+                            LocationAndOrientationTracker.calculateBearingDegrees(
+                                poi.latitude,
+                                poi.longitude,
+                                currentLatitude,
+                                currentLongitude
+                            )
+                        }
+                        capturedPlacement = CapturedArPlacement(
+                            latitude = currentLatitude,
+                            longitude = currentLongitude,
+                            accuracyMeters = gpsAccuracyMeters,
+                            azimuthDegrees = placementAzimuth,
+                            distanceMeters = placementDistance
+                        )
+                        azimuthText = placementAzimuth.toString()
+                        distanceText = java.lang.String.format(java.util.Locale.US, "%.1f", placementDistance)
+                    },
+                    enabled = canCapturePlacement && !isSubmitting,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        when {
+                            capturedPlacement != null -> if (isEn) "Update AR position here" else "Cập nhật vị trí AR tại đây"
+                            isEn -> "Save AR position here"
+                            else -> "Lưu vị trí AR tại đây"
+                        }
+                    )
+                }
+                capturedPlacement?.let { placement ->
+                    Text(
+                        text = if (isEn) {
+                            "Saved coordinates: ${formatGpsCoordinate(placement.latitude)}, ${formatGpsCoordinate(placement.longitude)} • Bearing ${placement.azimuthDegrees.roundToInt()}°"
+                        } else {
+                            "Tọa độ đã lưu: ${formatGpsCoordinate(placement.latitude)}, ${formatGpsCoordinate(placement.longitude)} • Hướng ${placement.azimuthDegrees.roundToInt()}°"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                FilledTonalButton(
+                    onClick = {
+                        val cameraBearing = ((currentAzimuthDegrees % 360f) + 360f) % 360f
+                        azimuthText = cameraBearing.toString()
+                        capturedPlacement = capturedPlacement?.copy(azimuthDegrees = cameraBearing)
+                    },
+                    enabled = canCapturePlacement && capturedPlacement != null && !isSubmitting,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (isEn) "Adjust to current compass heading" else "Chỉnh theo hướng la bàn hiện tại")
+                }
                 OutlinedTextField(
                     value = titleVi,
                     onValueChange = { titleVi = it },
@@ -619,17 +822,6 @@ private fun CreateFixedArCardDialog(
                     label = { Text(if (isEn) "Pinned compass bearing (0–360°)" else "Hướng la bàn đã ghim (0–360°)") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                FilledTonalButton(
-                    onClick = {
-                        azimuthText = "${((currentAzimuthDegrees % 360f) + 360f) % 360f}"
-                    },
-                    enabled = isAtPoi,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (isEn) "Pin current camera direction (${currentAzimuthDegrees.roundToInt()}°)" else "Ghim theo hướng camera (${currentAzimuthDegrees.roundToInt()}°)")
-                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = distanceText,
@@ -697,28 +889,145 @@ private fun CreateFixedArCardDialog(
 }
 
 @Composable
+private fun EditArInfoCardDialog(
+    card: AdminArInfoCardDto,
+    selectedLanguage: String,
+    onDismiss: () -> Unit,
+    onSubmit: suspend (String, UpsertArInfoCardRequest) -> String?
+) {
+    val isEn = selectedLanguage.equals("en", ignoreCase = true)
+    val scope = rememberCoroutineScope()
+    val vi = remember(card.id) { card.localizations.firstOrNull { it.languageCode.equals("vi", true) } }
+    val en = remember(card.id) { card.localizations.firstOrNull { it.languageCode.equals("en", true) } }
+    var titleVi by remember(card.id) { mutableStateOf(vi?.title.orEmpty()) }
+    var titleEn by remember(card.id) { mutableStateOf(en?.title.orEmpty()) }
+    var subtitleVi by remember(card.id) { mutableStateOf(vi?.subtitle.orEmpty()) }
+    var subtitleEn by remember(card.id) { mutableStateOf(en?.subtitle.orEmpty()) }
+    var contentVi by remember(card.id) { mutableStateOf(vi?.content.orEmpty()) }
+    var contentEn by remember(card.id) { mutableStateOf(en?.content.orEmpty()) }
+    var cardType by remember(card.id) { mutableStateOf(card.cardType) }
+    var azimuthText by remember(card.id) { mutableStateOf(card.azimuthDegrees.toString()) }
+    var distanceText by remember(card.id) { mutableStateOf(card.distanceMeters.toString()) }
+    var elevationText by remember(card.id) { mutableStateOf(card.elevationMeters.toString()) }
+    var displayOrderText by remember(card.id) { mutableStateOf(card.displayOrder.toString()) }
+    var isActive by remember(card.id) { mutableStateOf(card.isActive) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val azimuth = azimuthText.replace(',', '.').toDoubleOrNull()
+    val distance = distanceText.replace(',', '.').toDoubleOrNull()
+    val elevation = elevationText.replace(',', '.').toDoubleOrNull()
+    val displayOrder = displayOrderText.toIntOrNull()
+    val hasContent = (titleVi.isNotBlank() || titleEn.isNotBlank()) &&
+        (contentVi.isNotBlank() || contentEn.isNotBlank())
+    val canSubmit = hasContent && cardType.isNotBlank() && azimuth != null && azimuth in 0.0..360.0 &&
+        distance != null && distance in 1.0..50.0 && elevation != null && elevation in -5.0..20.0 &&
+        displayOrder != null && displayOrder >= 1 && !isSubmitting
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        title = { Text(if (isEn) "Edit AR card" else "Chỉnh sửa thẻ AR") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(cardType, { cardType = it }, label = { Text("Loại thẻ") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(titleVi, { titleVi = it }, label = { Text("Tiêu đề (VI)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(subtitleVi, { subtitleVi = it }, label = { Text("Phụ đề (VI)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(contentVi, { contentVi = it }, label = { Text("Nội dung (VI)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                OutlinedTextField(titleEn, { titleEn = it }, label = { Text("Title (EN)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(subtitleEn, { subtitleEn = it }, label = { Text("Subtitle (EN)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(contentEn, { contentEn = it }, label = { Text("Content (EN)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                OutlinedTextField(azimuthText, { azimuthText = it }, label = { Text("Hướng la bàn (0–360°)") }, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(distanceText, { distanceText = it }, label = { Text("Khoảng cách (1–50m)") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(elevationText, { elevationText = it }, label = { Text("Độ cao (−5–20m)") }, modifier = Modifier.weight(1f))
+                }
+                OutlinedTextField(displayOrderText, { displayOrderText = it }, label = { Text("Thứ tự hiển thị") }, modifier = Modifier.fillMaxWidth())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (isEn) "Active" else "Kích hoạt", modifier = Modifier.weight(1f))
+                    Switch(checked = isActive, onCheckedChange = { isActive = it })
+                }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = canSubmit,
+                onClick = {
+                    val az = azimuth ?: return@Button
+                    val dist = distance ?: return@Button
+                    val elev = elevation ?: return@Button
+                    val order = displayOrder ?: return@Button
+                    val request = UpsertArInfoCardRequest(
+                        cardType = cardType.trim(),
+                        azimuthDegrees = az.toFloat(),
+                        distanceMeters = dist.toFloat(),
+                        elevationMeters = elev.toFloat(),
+                        displayOrder = order,
+                        isActive = isActive,
+                        localizations = listOf(
+                            ArCardLocalizationInputDto(
+                                languageCode = "vi",
+                                title = titleVi.ifBlank { titleEn }.trim(),
+                                subtitle = subtitleVi.ifBlank { subtitleEn }.trim().ifBlank { null },
+                                content = contentVi.ifBlank { contentEn }.trim()
+                            ),
+                            ArCardLocalizationInputDto(
+                                languageCode = "en",
+                                title = titleEn.ifBlank { titleVi }.trim(),
+                                subtitle = subtitleEn.ifBlank { subtitleVi }.trim().ifBlank { null },
+                                content = contentEn.ifBlank { contentVi }.trim()
+                            )
+                        )
+                    )
+                    scope.launch {
+                        isSubmitting = true
+                        errorMessage = null
+                        val error = onSubmit(card.id, request)
+                        isSubmitting = false
+                        if (error == null) onDismiss() else errorMessage = error
+                    }
+                }
+            ) { Text(if (isSubmitting) "Đang lưu…" else "Lưu thay đổi") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) { Text("Hủy") }
+        }
+    )
+}
+
+@Composable
 private fun CreatePoiDialog(
+    initialPoi: AdminPoiDto? = null,
     defaultLatitude: Double,
     defaultLongitude: Double,
     hasFreshGpsFix: Boolean,
     gpsAccuracyMeters: Float,
     currentAzimuthDegrees: Float,
     onDismiss: () -> Unit,
-    onSubmit: (CreateOrUpdatePoiRequest) -> Unit
+    onSubmit: (CreateOrUpdatePoiRequest, Uri?) -> Unit
 ) {
-    var titleVi by remember { mutableStateOf("") }
-    var titleEn by remember { mutableStateOf("") }
-    var summaryVi by remember { mutableStateOf("") }
-    var summaryEn by remember { mutableStateOf("") }
-    var storyVi by remember { mutableStateOf("") }
-    var storyEn by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("Heritage Landmark") }
-    var latitudeText by remember { mutableStateOf(if (hasFreshGpsFix) formatGpsCoordinate(defaultLatitude) else "") }
-    var longitudeText by remember { mutableStateOf(if (hasFreshGpsFix) formatGpsCoordinate(defaultLongitude) else "") }
-    var radiusText by remember { mutableStateOf("60") }
+    val initialVi = remember(initialPoi?.id) { initialPoi?.localizations?.firstOrNull { it.languageCode.equals("vi", true) } }
+    val initialEn = remember(initialPoi?.id) { initialPoi?.localizations?.firstOrNull { it.languageCode.equals("en", true) } }
+    var titleVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.title.orEmpty()) }
+    var titleEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.title.orEmpty()) }
+    var summaryVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.shortSummary.orEmpty()) }
+    var summaryEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.shortSummary.orEmpty()) }
+    var storyVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.culturalStoryMarkdown.orEmpty()) }
+    var storyEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.culturalStoryMarkdown.orEmpty()) }
+    var category by remember(initialPoi?.id) { mutableStateOf(initialPoi?.category ?: "Heritage Landmark") }
+    var latitudeText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.latitude?.let(::formatGpsCoordinate) ?: if (hasFreshGpsFix) formatGpsCoordinate(defaultLatitude) else "") }
+    var longitudeText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.longitude?.let(::formatGpsCoordinate) ?: if (hasFreshGpsFix) formatGpsCoordinate(defaultLongitude) else "") }
+    var radiusText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.activationRadiusMeters?.toString() ?: "60") }
     var arCardTitle by remember { mutableStateOf("Architectural Highlight") }
     var arCardBody by remember { mutableStateOf("360° Spatial AR Cultural Note anchored at this landmark.") }
     var arCardAzimuth by remember { mutableStateOf("${((currentAzimuthDegrees % 360f) + 360f) % 360f}") }
+    var coverImageUri by remember(initialPoi?.id) { mutableStateOf<Uri?>(null) }
+    val pickCoverImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        coverImageUri = uri
+    }
 
     val parsedLatitude = latitudeText.replace(',', '.').toDoubleOrNull()
     val parsedLongitude = longitudeText.replace(',', '.').toDoubleOrNull()
@@ -727,7 +1036,8 @@ private fun CreatePoiDialog(
     val hasValidCoordinates = parsedLatitude != null && parsedLatitude in -90.0..90.0 &&
         parsedLongitude != null && parsedLongitude in -180.0..180.0
     val canSubmit = (titleVi.isNotBlank() || titleEn.isNotBlank()) && hasValidCoordinates &&
-        parsedRadius != null && parsedRadius > 0.0 && parsedAzimuth != null && parsedAzimuth >= 0f && parsedAzimuth < 360f
+        parsedRadius != null && parsedRadius > 0.0 &&
+        (initialPoi != null || (parsedAzimuth != null && parsedAzimuth >= 0f && parsedAzimuth < 360f))
 
     LaunchedEffect(hasFreshGpsFix, defaultLatitude, defaultLongitude) {
         if (hasFreshGpsFix && latitudeText.isBlank() && longitudeText.isBlank()) {
@@ -738,7 +1048,7 @@ private fun CreatePoiDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create Heritage POI (PendingApproval)", fontWeight = FontWeight.Bold) },
+        title = { Text(if (initialPoi == null) "Tạo địa điểm mới" else "Chỉnh sửa địa điểm", fontWeight = FontWeight.Bold) },
         text = {
             Column(
                 modifier = Modifier
@@ -746,6 +1056,36 @@ private fun CreatePoiDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Text("Ảnh thumbnail trang Địa điểm", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val previewImage: Any? = coverImageUri ?: initialPoi?.coverImageUrl
+                    if (previewImage != null) {
+                        AsyncImage(
+                            model = previewImage,
+                            contentDescription = "POI thumbnail preview",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Color.LightGray)
+                        )
+                    } else {
+                        Surface(
+                            modifier = Modifier.size(76.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        OutlinedButton(onClick = { pickCoverImage.launch("image/*") }) {
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (coverImageUri == null) "Chọn ảnh" else "Đổi ảnh")
+                        }
+                        Text("Ảnh tự nén còn khoảng 300 KB trước khi tải lên.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 OutlinedTextField(
                     value = titleVi,
                     onValueChange = { titleVi = it },
@@ -830,43 +1170,59 @@ private fun CreatePoiDialog(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2
                 )
-                Divider(modifier = Modifier.padding(vertical = 4.dp))
-                Text("Thẻ thông tin AR được ghim tại địa điểm", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 OutlinedTextField(
-                    value = arCardTitle,
-                    onValueChange = { arCardTitle = it },
-                    label = { Text("AR Card Title") },
-                    modifier = Modifier.fillMaxWidth()
+                    value = storyVi,
+                    onValueChange = { storyVi = it },
+                    label = { Text("Câu chuyện văn hóa (VI)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
                 )
                 OutlinedTextField(
-                    value = arCardAzimuth,
-                    onValueChange = { arCardAzimuth = it },
-                    label = { Text("Hướng AR (độ, 0–359)") },
-                    modifier = Modifier.fillMaxWidth()
+                    value = storyEn,
+                    onValueChange = { storyEn = it },
+                    label = { Text("Cultural story (EN)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
                 )
-                FilledTonalButton(
-                    onClick = {
-                        arCardAzimuth = "${((currentAzimuthDegrees % 360f) + 360f) % 360f}"
-                    },
-                    enabled = hasFreshGpsFix,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Ghim theo hướng camera hiện tại (${currentAzimuthDegrees.roundToInt()}°)")
+                if (initialPoi == null) {
+                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text("Thẻ thông tin AR được ghim tại địa điểm", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    OutlinedTextField(
+                        value = arCardTitle,
+                        onValueChange = { arCardTitle = it },
+                        label = { Text("AR Card Title") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = arCardAzimuth,
+                        onValueChange = { arCardAzimuth = it },
+                        label = { Text("Hướng AR (độ, 0–359)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    FilledTonalButton(
+                        onClick = {
+                            arCardAzimuth = "${((currentAzimuthDegrees % 360f) + 360f) % 360f}"
+                        },
+                        enabled = hasFreshGpsFix,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Ghim theo hướng camera hiện tại (${currentAzimuthDegrees.roundToInt()}°)")
+                    }
+                    OutlinedTextField(
+                        value = arCardBody,
+                        onValueChange = { arCardBody = it },
+                        label = { Text("AR Card Description") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-                OutlinedTextField(
-                    value = arCardBody,
-                    onValueChange = { arCardBody = it },
-                    label = { Text("AR Card Description") },
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val slug = (titleEn.ifBlank { titleVi }).lowercase()
+                    val slug = initialPoi?.slug ?: (titleEn.ifBlank { titleVi }).lowercase()
                         .replace(Regex("[^a-z0-9]+"), "-")
                         .trim('-')
                         .ifBlank { "poi-${System.currentTimeMillis()}" }
@@ -874,7 +1230,7 @@ private fun CreatePoiDialog(
                     val lat = parsedLatitude ?: return@Button
                     val lng = parsedLongitude ?: return@Button
                     val radius = parsedRadius ?: return@Button
-                    val azimuthInput = parsedAzimuth ?: return@Button
+                    val azimuthInput = parsedAzimuth ?: 0f
                     val azimuth = ((azimuthInput % 360f) + 360f) % 360f
 
                     onSubmit(
@@ -884,21 +1240,24 @@ private fun CreatePoiDialog(
                             latitude = lat,
                             longitude = lng,
                             activationRadiusMeters = radius,
+                            coverImageUrl = initialPoi?.coverImageUrl,
                             translations = listOf(
                                 PoiTranslationInputDto(
                                     languageCode = "vi",
                                     title = titleVi.ifBlank { titleEn },
                                     shortSummary = summaryVi.ifBlank { "Điểm tham quan văn hóa lịch sử." },
-                                    culturalStoryMarkdown = storyVi.ifBlank { summaryVi }
+                                    culturalStoryMarkdown = storyVi.ifBlank { summaryVi },
+                                    historicalPeriod = initialVi?.historicalPeriod
                                 ),
                                 PoiTranslationInputDto(
                                     languageCode = "en",
                                     title = titleEn.ifBlank { titleVi },
                                     shortSummary = summaryEn.ifBlank { "Cultural and historical sightseeing landmark." },
-                                    culturalStoryMarkdown = storyEn.ifBlank { summaryEn }
+                                    culturalStoryMarkdown = storyEn.ifBlank { summaryEn },
+                                    historicalPeriod = initialEn?.historicalPeriod
                                 )
                             ),
-                            arInfoCards = listOf(
+                            arInfoCards = if (initialPoi == null) listOf(
                                 ArInfoCardInputDto(
                                     languageCode = "vi",
                                     title = arCardTitle,
@@ -906,13 +1265,14 @@ private fun CreatePoiDialog(
                                     bodyText = arCardBody,
                                     azimuthDegrees = azimuth
                                 )
-                            )
-                        )
+                            ) else emptyList()
+                        ),
+                        coverImageUri
                     )
                 },
                 enabled = canSubmit
             ) {
-                Text("Submit for SuperAdmin Approval")
+                Text(if (initialPoi == null) "Gửi phê duyệt" else "Lưu thay đổi")
             }
         },
         dismissButton = {

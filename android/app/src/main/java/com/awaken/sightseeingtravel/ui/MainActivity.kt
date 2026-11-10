@@ -230,12 +230,17 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                 hasFreshGpsFix = spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f,
                 gpsAccuracyMeters = spatialPose.accuracyMeters,
                 currentAzimuthDegrees = spatialPose.azimuthDegrees,
+                adminArCardsByPoi = uiState.adminArCardsByPoi,
                 onCreateFixedArCard = viewModel::createAdminArInfoCard,
+                onUpdateArInfoCard = viewModel::updateAdminArInfoCard,
                 onFilterStatusChange = { status ->
                     viewModel.loadAdminConsoleData(status)
                 },
-                onCreatePoiSubmit = { request ->
-                    viewModel.createPoiAsAdmin(request)
+                onCreatePoiSubmit = { request, coverImageUri ->
+                    viewModel.createPoiAsAdmin(request, coverImageUri)
+                },
+                onUpdatePoiSubmit = { poiId, request, coverImageUri ->
+                    viewModel.updatePoiAsAdmin(poiId, request, coverImageUri)
                 },
                 onSuperAdminApprovePoi = { poiId, notes ->
                     viewModel.approvePoiAsSuperAdmin(poiId, notes)

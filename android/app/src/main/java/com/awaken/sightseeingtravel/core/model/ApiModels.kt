@@ -360,8 +360,8 @@ data class RejectPoiRequest(
 
 data class AdminPoiDto(
     @SerializedName("id") val id: String,
-    @SerializedName("slug") val slug: String,
-    @SerializedName("category") val category: String,
+    @SerializedName(value = "slug", alternate = ["code"]) val slug: String,
+    @SerializedName("category") val category: String = "Heritage Landmark",
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("activationRadiusMeters") val activationRadiusMeters: Double = 50.0,
@@ -374,10 +374,24 @@ data class AdminPoiDto(
     @SerializedName("titleEn") val titleEn: String = "",
     @SerializedName("shortSummaryVi") val shortSummaryVi: String = "",
     @SerializedName("shortSummaryEn") val shortSummaryEn: String = "",
-    @SerializedName("arInfoCardCount") val arInfoCardCount: Int = 0
+    @SerializedName("arInfoCardCount") val arInfoCardCount: Int = 0,
+    @SerializedName("coverImageUrl") val coverImageUrl: String? = null,
+    @SerializedName("localizations") val localizations: List<PoiTranslationInputDto> = emptyList()
 ) {
     val parsedStatus: PoiStatus
         get() = PoiStatus.fromString(status)
+
+    fun titleFor(languageCode: String): String =
+        localizations.firstOrNull { it.languageCode.equals(languageCode, ignoreCase = true) }?.title
+            ?.takeIf(String::isNotBlank)
+            ?: if (languageCode.equals("en", ignoreCase = true)) titleEn.ifBlank { titleVi.ifBlank { slug } }
+            else titleVi.ifBlank { titleEn.ifBlank { slug } }
+
+    fun summaryFor(languageCode: String): String =
+        localizations.firstOrNull { it.languageCode.equals(languageCode, ignoreCase = true) }?.shortSummary
+            ?.takeIf(String::isNotBlank)
+            ?: if (languageCode.equals("en", ignoreCase = true)) shortSummaryEn.ifBlank { shortSummaryVi }
+            else shortSummaryVi.ifBlank { shortSummaryEn }
 }
 
 data class ModerationPhotoItemDto(
