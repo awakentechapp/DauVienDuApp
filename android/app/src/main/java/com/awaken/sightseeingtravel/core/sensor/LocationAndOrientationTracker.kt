@@ -25,7 +25,9 @@ data class DeviceSpatialPose(
     val hasLiveGpsFix: Boolean = false,
     val locationFixTimeMillis: Long = 0L,
     val isSimulatedLocation: Boolean = false,
+    val speedMetersPerSecond: Float = 0f,
     val azimuthDegrees: Float = 0f, // 0..360 (0=N, 90=E, 180=S, 270=W)
+    val courseDegrees: Float = 0f,
     val pitchDegrees: Float = 0f,   // Up/Down camera tilt (-90..+90)
     val rollDegrees: Float = 0f
 ) {
@@ -69,14 +71,34 @@ class LocationAndOrientationTracker(context: Context) : SensorEventListener {
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val loc: Location = result.lastLocation ?: return
-            _spatialPose.value = _spatialPose.value.copy(
+            val previous = _spatialPose.value
+            val displacementMeters = if (previous.hasLiveGpsFix) {
+                calculateDistanceMeters(previous.latitude, previous.longitude, loc.latitude, loc.longitude)
+            } else {
+                0.0
+            }
+            val gpsCourse = when {
+                loc.hasBearing() && loc.hasSpeed() && loc.speed >= 0.8f -> loc.bearing
+                displacementMeters >= 3.0 -> calculateBearingDegrees(
+                    previous.latitude,
+                    previous.longitude,
+                    loc.latitude,
+                    loc.longitude
+                )
+                else -> null
+            }
+            _spatialPose.value = previous.copy(
                 latitude = loc.latitude,
                 longitude = loc.longitude,
                 altitudeMeters = if (loc.hasAltitude()) loc.altitude else 5.0,
                 accuracyMeters = if (loc.hasAccuracy()) loc.accuracy else 10.0f,
                 hasLiveGpsFix = true,
                 locationFixTimeMillis = loc.time,
-                isSimulatedLocation = false
+                isSimulatedLocation = false,
+                speedMetersPerSecond = if (loc.hasSpeed()) loc.speed else 0f,
+                courseDegrees = gpsCourse?.let {
+                    smoothAngleDegrees(previous.courseDegrees, it, alpha = 0.35f)
+                } ?: previous.courseDegrees
             )
         }
     }
@@ -162,6 +184,7 @@ class LocationAndOrientationTracker(context: Context) : SensorEventListener {
 
         _spatialPose.value = prev.copy(
             azimuthDegrees = smoothedAzimuth,
+            courseDegrees = if (prev.speedMetersPerSecond < 0.8f) smoothedAzimuth else prev.courseDegrees,
             pitchDegrees = smoothedPitch,
             rollDegrees = rawRollDeg
         )

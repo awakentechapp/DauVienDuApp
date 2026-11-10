@@ -9,6 +9,7 @@ namespace SightseeingTravel.Api.Infrastructure;
 public static class NavigationEndpoints
 {
     private const string RoutingClientName = "OsrmRouting";
+    private const string WalkingRoutingClientName = "OsrmWalkingRouting";
 
     public static IEndpointRouteBuilder MapNavigationEndpoints(this IEndpointRouteBuilder app)
     {
@@ -27,16 +28,34 @@ public static class NavigationEndpoints
                 return Results.BadRequest(new { message = "Origin and destination coordinates are invalid." });
             }
 
+            var travelMode = request.TravelMode?.Trim().ToLowerInvariant() switch
+            {
+                null or "" or "car" => TravelMode.Car,
+                "walking" or "walk" or "person" => TravelMode.Walking,
+                "motorcycle" or "motorbike" => TravelMode.Motorcycle,
+                _ => (TravelMode?)null
+            };
+            if (travelMode is null)
+            {
+                return Results.BadRequest(new { message = "Travel mode must be walking, car, or motorcycle." });
+            }
+
             var coordinates = string.Join(";", new[]
             {
                 FormatCoordinate(request.OriginLongitude, request.OriginLatitude),
                 FormatCoordinate(request.DestinationLongitude, request.DestinationLatitude)
             });
-            var routeUri = $"route/v1/driving/{coordinates}?overview=full&geometries=geojson";
+            var (clientName, profile, modeOptions) = travelMode.Value switch
+            {
+                TravelMode.Walking => (WalkingRoutingClientName, "foot", ""),
+                TravelMode.Motorcycle => (RoutingClientName, "driving", "&exclude=motorway"),
+                _ => (RoutingClientName, "driving", "")
+            };
+            var routeUri = $"route/v1/{profile}/{coordinates}?overview=full&geometries=geojson{modeOptions}";
 
             try
             {
-                var client = httpClientFactory.CreateClient(RoutingClientName);
+                var client = httpClientFactory.CreateClient(clientName);
                 using var response = await client.GetAsync(routeUri, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -54,13 +73,13 @@ public static class NavigationEndpoints
 
                 if (!string.Equals(code, "Ok", StringComparison.Ordinal))
                 {
-                    return Results.UnprocessableEntity(new { message = "No drivable route was found." });
+                    return Results.UnprocessableEntity(new { message = "No route was found for the selected travel mode." });
                 }
 
                 if (!root.TryGetProperty("routes", out var routes) ||
                     routes.ValueKind != JsonValueKind.Array || routes.GetArrayLength() == 0)
                 {
-                    return Results.UnprocessableEntity(new { message = "No drivable route was found." });
+                    return Results.UnprocessableEntity(new { message = "No route was found for the selected travel mode." });
                 }
 
                 var route = routes[0];
@@ -82,6 +101,7 @@ public static class NavigationEndpoints
                 }
 
                 return Results.Ok(new CalculateRouteResponse(
+                    TravelMode: travelMode.Value.ToString().ToLowerInvariant(),
                     DistanceMeters: route.GetProperty("distance").GetDouble(),
                     DurationSeconds: route.GetProperty("duration").GetDouble(),
                     Coordinates: path));
@@ -135,11 +155,20 @@ public sealed record CalculateRouteRequest(
     double OriginLatitude,
     double OriginLongitude,
     double DestinationLatitude,
-    double DestinationLongitude);
+    double DestinationLongitude,
+    string TravelMode = "car");
+
+internal enum TravelMode
+{
+    Walking,
+    Car,
+    Motorcycle
+}
 
 public sealed record RouteCoordinate(double Latitude, double Longitude);
 
 public sealed record CalculateRouteResponse(
+    string TravelMode,
     double DistanceMeters,
     double DurationSeconds,
     IReadOnlyList<RouteCoordinate> Coordinates);

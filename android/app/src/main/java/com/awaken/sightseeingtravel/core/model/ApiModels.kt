@@ -29,7 +29,8 @@ data class CalculateRouteRequestDto(
     @SerializedName("originLatitude") val originLatitude: Double,
     @SerializedName("originLongitude") val originLongitude: Double,
     @SerializedName("destinationLatitude") val destinationLatitude: Double,
-    @SerializedName("destinationLongitude") val destinationLongitude: Double
+    @SerializedName("destinationLongitude") val destinationLongitude: Double,
+    @SerializedName("travelMode") val travelMode: String = "car"
 )
 
 data class RouteCoordinateDto(
@@ -40,7 +41,8 @@ data class RouteCoordinateDto(
 data class CalculatedRouteDto(
     @SerializedName("distanceMeters") val distanceMeters: Double,
     @SerializedName("durationSeconds") val durationSeconds: Double,
-    @SerializedName("coordinates") val coordinates: List<RouteCoordinateDto>
+    @SerializedName("coordinates") val coordinates: List<RouteCoordinateDto>,
+    @SerializedName("travelMode") val travelMode: String? = null
 )
 
 /**

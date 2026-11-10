@@ -24,6 +24,12 @@ builder.Services.AddHttpClient("OsrmRouting", client =>
     client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
     client.Timeout = TimeSpan.FromSeconds(20);
 });
+builder.Services.AddHttpClient("OsrmWalkingRouting", client =>
+{
+    var baseUrl = builder.Configuration["Routing:WalkingBaseUrl"] ?? "http://127.0.0.1:5001/";
+    client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 
 builder.Services.Configure<ContaboStorageOptions>(
     builder.Configuration.GetSection(ContaboStorageOptions.SectionName));

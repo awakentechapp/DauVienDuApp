@@ -29,6 +29,7 @@ data class SightseeingUiState(
     val nearbyPois: List<PoiPinSummaryDto> = emptyList(),
     val selectedPoiDetail: PoiDetailDto? = null,
     val navigationTarget: NavigationTarget? = null,
+    val navigationTravelMode: NavigationTravelMode = NavigationTravelMode.CAR,
     val activeNavigationRoute: ActiveNavigationRoute? = null,
     val isCalculatingRoute: Boolean = false,
     val navigationError: String? = null,
@@ -47,9 +48,16 @@ data class NavigationTarget(
     val longitude: Double
 )
 
+enum class NavigationTravelMode(val apiValue: String) {
+    WALKING("walking"),
+    CAR("car"),
+    MOTORCYCLE("motorcycle")
+}
+
 data class ActiveNavigationRoute(
     val routeId: Long,
     val target: NavigationTarget,
+    val travelMode: NavigationTravelMode,
     val distanceMeters: Double,
     val durationSeconds: Double,
     val coordinates: List<RouteCoordinateDto>
@@ -66,6 +74,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     private val apiService: SightseeingApiService =
         SightseeingNetworkModule.createApiService(tokenStore)
     private var navigationJob: Job? = null
+    private var lastNavigationRequestLocation: Pair<Double, Double>? = null
+    private var lastNavigationRequestAtMillis: Long = 0L
     val locationAndOrientationTracker = LocationAndOrientationTracker(application)
 
     val spatialPose: StateFlow<DeviceSpatialPose> = locationAndOrientationTracker.spatialPose
@@ -90,6 +100,15 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         } else if (tokenStore.currentUser.value != null) {
             // A profile without its access token is not an authenticated session.
             tokenStore.clearSession()
+        }
+
+        viewModelScope.launch {
+            spatialPose
+                .map { it.latitude to it.longitude }
+                .distinctUntilChanged()
+                .collect {
+                    maybeRefreshNavigationRoute()
+                }
         }
     }
 
@@ -367,7 +386,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         poiId: String,
         title: String,
         latitude: Double,
-        longitude: Double
+        longitude: Double,
+        travelMode: NavigationTravelMode = _uiState.value.navigationTravelMode
     ) {
         navigationJob?.cancel()
         val target = NavigationTarget(poiId, title, latitude, longitude)
@@ -377,6 +397,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             it.copy(
                 selectedPoiDetail = null,
                 navigationTarget = target,
+                navigationTravelMode = travelMode,
                 activeNavigationRoute = null,
                 isCalculatingRoute = false,
                 navigationError = null
@@ -407,6 +428,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             return
         }
 
+        lastNavigationRequestLocation = pose.latitude to pose.longitude
+        lastNavigationRequestAtMillis = System.currentTimeMillis()
         navigationJob = viewModelScope.launch {
             _uiState.update { it.copy(isCalculatingRoute = true, navigationError = null) }
             try {
@@ -415,7 +438,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         originLatitude = pose.latitude,
                         originLongitude = pose.longitude,
                         destinationLatitude = target.latitude,
-                        destinationLongitude = target.longitude
+                        destinationLongitude = target.longitude,
+                        travelMode = travelMode.apiValue
                     )
                 )
                 val route = response.data
@@ -424,9 +448,25 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         it.copy(
                             isCalculatingRoute = false,
                             navigationError = if (it.selectedLanguage == "en") {
-                                "No drivable route was found to this pin."
+                                "No route was found for this travel mode."
                             } else {
-                                "Không tìm thấy tuyến đường bộ đến pin này."
+                                "Không tìm thấy tuyến phù hợp cho phương tiện này."
+                            }
+                        )
+                    }
+                    return@launch
+                }
+
+                if (route.travelMode?.lowercase() != travelMode.apiValue &&
+                    (route.travelMode != null || travelMode != NavigationTravelMode.CAR)
+                ) {
+                    _uiState.update {
+                        it.copy(
+                            isCalculatingRoute = false,
+                            navigationError = if (it.selectedLanguage == "en") {
+                                "The server needs the latest routing update for this travel mode."
+                            } else {
+                                "Máy chủ cần được cập nhật để tính tuyến cho phương tiện này."
                             }
                         )
                     }
@@ -440,6 +480,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         activeNavigationRoute = ActiveNavigationRoute(
                             routeId = System.currentTimeMillis(),
                             target = target,
+                            travelMode = travelMode,
                             distanceMeters = route.distanceMeters,
                             durationSeconds = route.durationSeconds,
                             coordinates = route.coordinates
@@ -452,7 +493,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 val useEnglishMessage = _uiState.value.selectedLanguage == "en"
                 val message = when (statusCode) {
                     404 -> if (useEnglishMessage) "The routing API is unavailable on the server. Please update the server and try again." else "API định tuyến chưa có trên máy chủ. Vui lòng cập nhật máy chủ rồi thử lại."
-                    422 -> if (useEnglishMessage) "No drivable route was found to this pin." else "Không tìm thấy tuyến đường bộ đến pin này."
+                    422 -> if (useEnglishMessage) "No route was found for this travel mode." else "Không tìm thấy tuyến phù hợp cho phương tiện này."
                     503 -> if (useEnglishMessage) "The routing service is starting or temporarily unavailable. Please retry shortly." else "Dịch vụ tính tuyến đang khởi động hoặc tạm gián đoạn. Vui lòng thử lại sau."
                     401 -> if (useEnglishMessage) "Your session has expired. Please sign in again." else "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
                     else -> if (useEnglishMessage) "Could not calculate a route. Check your connection and try again." else "Chưa thể tính tuyến. Hãy kiểm tra kết nối rồi thử lại."
@@ -462,14 +503,71 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
+    fun selectNavigationTravelMode(travelMode: NavigationTravelMode) {
+        val state = _uiState.value
+        if (state.navigationTravelMode == travelMode) return
+
+        _uiState.update {
+            it.copy(
+                navigationTravelMode = travelMode,
+                activeNavigationRoute = null,
+                navigationError = null
+            )
+        }
+
+        val target = state.navigationTarget ?: return
+        calculateRouteToPin(
+            poiId = target.poiId,
+            title = target.title,
+            latitude = target.latitude,
+            longitude = target.longitude,
+            travelMode = travelMode
+        )
+    }
+
+    private fun maybeRefreshNavigationRoute() {
+        val state = _uiState.value
+        val target = state.navigationTarget ?: return
+        if (state.activeNavigationRoute == null || state.isCalculatingRoute) return
+
+        val pose = spatialPose.value
+        if (!pose.hasFreshGpsFix || pose.isSimulatedLocation) return
+
+        val origin = lastNavigationRequestLocation ?: return
+        val movedMeters = LocationAndOrientationTracker.calculateDistanceMeters(
+            origin.first,
+            origin.second,
+            pose.latitude,
+            pose.longitude
+        )
+        val now = System.currentTimeMillis()
+        if (movedMeters < 120.0 || now - lastNavigationRequestAtMillis < 30_000L) return
+
+        calculateRouteToPin(
+            poiId = target.poiId,
+            title = target.title,
+            latitude = target.latitude,
+            longitude = target.longitude,
+            travelMode = state.navigationTravelMode
+        )
+    }
+
     fun recalculateNavigationRoute() {
         val target = _uiState.value.navigationTarget ?: return
-        calculateRouteToPin(target.poiId, target.title, target.latitude, target.longitude)
+        calculateRouteToPin(
+            target.poiId,
+            target.title,
+            target.latitude,
+            target.longitude,
+            _uiState.value.navigationTravelMode
+        )
     }
 
     fun clearNavigation() {
         navigationJob?.cancel()
         navigationJob = null
+        lastNavigationRequestLocation = null
+        lastNavigationRequestAtMillis = 0L
         _uiState.update {
             it.copy(
                 navigationTarget = null,

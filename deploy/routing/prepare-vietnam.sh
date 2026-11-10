@@ -20,9 +20,18 @@ run_osrm() {
   docker run --rm --cpus=2 --volume "$DATA_DIR:/data" "$IMAGE" "$@"
 }
 
-run_osrm osrm-extract --threads 2 -p /opt/car.lua /data/vietnam-latest.osm.pbf
-run_osrm osrm-partition --threads 2 /data/vietnam-latest.osrm
-run_osrm osrm-customize --threads 2 /data/vietnam-latest.osrm
+if [[ ! -s "$DATA_DIR/vietnam-latest.osrm.mldgr" ]]; then
+  run_osrm osrm-extract --threads 2 -p /opt/car.lua /data/vietnam-latest.osm.pbf
+  run_osrm osrm-partition --threads 2 /data/vietnam-latest.osrm
+  run_osrm osrm-customize --threads 2 /data/vietnam-latest.osrm
+fi
+
+mkdir -p "$DATA_DIR/foot"
+if [[ ! -s "$DATA_DIR/foot/vietnam-latest.osrm.mldgr" ]]; then
+  run_osrm osrm-extract --threads 2 -p /opt/foot.lua /data/vietnam-latest.osm.pbf --output /data/foot/vietnam-latest
+  run_osrm osrm-partition --threads 2 /data/foot/vietnam-latest.osrm
+  run_osrm osrm-customize --threads 2 /data/foot/vietnam-latest.osrm
+fi
 
 echo "OSRM Vietnam data is ready in $DATA_DIR"
-echo "Start it from the app repository with: docker compose --profile routing up -d routing"
+echo "Start car and walking routers with: docker compose --profile routing up -d routing routing-foot"

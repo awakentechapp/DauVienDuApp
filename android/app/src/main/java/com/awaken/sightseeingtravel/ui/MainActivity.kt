@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
@@ -371,6 +372,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                 onDirectionsToPin = { poiId, title, latitude, longitude ->
                                     viewModel.calculateRouteToPin(poiId, title, latitude, longitude)
                                 },
+                                onSelectNavigationMode = viewModel::selectNavigationTravelMode,
                                 onOpenArCamera = { poiId ->
                                     viewModel.openArExperienceForPoi(poiId) {
                                         currentDestination = AppDestination.AR_CAMERA
@@ -1182,6 +1184,7 @@ private fun ExploreMapTabContent(
     onIncrementRecenter: () -> Unit,
     onSelectPoi: (PoiPinSummaryDto) -> Unit,
     onDirectionsToPin: (poiId: String, title: String, latitude: Double, longitude: Double) -> Unit,
+    onSelectNavigationMode: (NavigationTravelMode) -> Unit,
     onOpenArCamera: (String) -> Unit,
     viewModel: SightseeingAppViewModel
 ) {
@@ -1197,6 +1200,11 @@ private fun ExploreMapTabContent(
             focusedPoiId = focusedPoiId,
             focusTrigger = mapFocusTrigger,
             navigationRoute = uiState.activeNavigationRoute,
+            navigationTravelMode = uiState.navigationTravelMode,
+            isNavigationActive = uiState.navigationTarget != null,
+            navigationSessionKey = uiState.navigationTarget?.let {
+                "${it.poiId}:${uiState.navigationTravelMode.apiValue}"
+            },
             onPoiMarkerClick = { tappedPin ->
                 onSelectPoi(tappedPin)
             },
@@ -1358,7 +1366,7 @@ private fun ExploreMapTabContent(
                 .padding(
                     end = 16.dp,
                     bottom = when {
-                        uiState.navigationTarget != null -> 210.dp
+                        uiState.navigationTarget != null -> 300.dp
                         uiState.selectedPoiDetail != null -> 340.dp
                         else -> 20.dp
                     }
@@ -1416,6 +1424,12 @@ private fun ExploreMapTabContent(
                         }
                     }
 
+                    NavigationTravelModeSelector(
+                        selectedMode = uiState.navigationTravelMode,
+                        isEnglish = isEn,
+                        onSelect = onSelectNavigationMode
+                    )
+
                     when {
                         uiState.isCalculatingRoute -> {
                             LinearProgressIndicator(
@@ -1423,7 +1437,7 @@ private fun ExploreMapTabContent(
                                 color = Color(0xFF2563EB)
                             )
                             Text(
-                                text = if (isEn) "Calculating the road route…" else "Đang tính tuyến đường bộ…",
+                                text = if (isEn) "Calculating the route…" else "Đang tính tuyến đường…",
                                 fontSize = 12.sp,
                                 color = Color(0xFF475569)
                             )
@@ -1527,6 +1541,52 @@ private fun ExploreMapTabContent(
                 },
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
+        }
+    }
+}
+
+@Composable
+private fun NavigationTravelModeSelector(
+    selectedMode: NavigationTravelMode,
+    isEnglish: Boolean,
+    onSelect: (NavigationTravelMode) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        NavigationTravelMode.entries.forEach { mode ->
+            val (icon, label) = when (mode) {
+                NavigationTravelMode.WALKING -> Icons.AutoMirrored.Filled.DirectionsWalk to if (isEnglish) "Walk" else "Đi bộ"
+                NavigationTravelMode.CAR -> Icons.Default.DirectionsCar to if (isEnglish) "Car" else "Ô tô"
+                NavigationTravelMode.MOTORCYCLE -> Icons.Default.TwoWheeler to if (isEnglish) "Motorbike" else "Xe máy"
+            }
+            val isSelected = selectedMode == mode
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) Color(0xFFDBEAFE) else Color(0xFFF1F5F9),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onSelect(mode) }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF475569),
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = label,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF475569),
+                        maxLines = 1
+                    )
+                }
+            }
         }
     }
 }

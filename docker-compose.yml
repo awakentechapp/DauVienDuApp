@@ -36,6 +36,7 @@ services:
       ConnectionStrings__DefaultConnection: "Host=127.0.0.1;Port=5432;Database=${POSTGRES_DB:-awkdvd};Username=${POSTGRES_USER:-awkdvd};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Database__ApplyMigrationsAndSeedOnStartup: "true"
       Routing__BaseUrl: "${ROUTING_BASE_URL:-http://127.0.0.1:5000/}"
+      Routing__WalkingBaseUrl: "${ROUTING_WALKING_BASE_URL:-http://127.0.0.1:5001/}"
       BootstrapAdmin__Email: "${BOOTSTRAP_ADMIN_EMAIL:-}"
       BootstrapAdmin__Password: "${BOOTSTRAP_ADMIN_PASSWORD:-}"
       Jwt__Issuer: "${JWT_ISSUER:-SightseeingTravel.Api}"
@@ -71,3 +72,26 @@ services:
       - "5000"
       - --mmap=on
       - /data/vietnam-latest.osrm
+
+  routing-foot:
+    profiles: ["routing"]
+    image: ghcr.io/project-osrm/osrm-backend:v26.10.0-debian
+    container_name: dauviendu-routing-foot
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DISABLE_ACCESS_LOGGING: "true"
+    volumes:
+      - /opt/dauviendu-routing:/data:ro
+    command:
+      - osrm-routed
+      - --algorithm
+      - mld
+      - --threads
+      - "2"
+      - --ip
+      - 127.0.0.1
+      - --port
+      - "5001"
+      - --mmap=on
+      - /data/foot/vietnam-latest.osrm

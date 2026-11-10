@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.os.Bundle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,15 +21,16 @@ import com.awaken.sightseeingtravel.core.model.PoiPinSummaryDto
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.ActiveNavigationRoute
+import com.awaken.sightseeingtravel.ui.NavigationTravelMode
 import com.google.gson.JsonObject
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.SymbolLayer
@@ -36,7 +39,6 @@ import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
-import kotlin.math.abs
 
 /**
  * Official OpenFreeMap/Bright Vector Tile Style URL for Android MapLibre.
@@ -58,6 +60,9 @@ fun OpenFreeMapComposeView(
     focusedPoiId: String?,
     focusTrigger: Int,
     navigationRoute: ActiveNavigationRoute?,
+    navigationTravelMode: NavigationTravelMode,
+    isNavigationActive: Boolean,
+    navigationSessionKey: String?,
     onPoiMarkerClick: (PoiPinSummaryDto) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -81,7 +86,13 @@ fun OpenFreeMapComposeView(
 
     val currentPois by rememberUpdatedState(pois)
     val currentNavigationRoute by rememberUpdatedState(navigationRoute)
+    val currentNavigationTravelMode by rememberUpdatedState(navigationTravelMode)
+    val currentIsNavigationActive by rememberUpdatedState(isNavigationActive)
+    val currentSelectedPoiId by rememberUpdatedState(selectedPoiId)
+    val currentSpatialPose by rememberUpdatedState(spatialPose)
     val currentOnPoiClick by rememberUpdatedState(onPoiMarkerClick)
+    val density = context.resources.displayMetrics.density
+    var fittedNavigationSession by remember { mutableStateOf<String?>(null) }
 
     // Bind MapView lifecycle to Compose LifecycleOwner
     DisposableEffect(lifecycleOwner, mapView) {
@@ -110,7 +121,7 @@ fun OpenFreeMapComposeView(
                     CameraPosition.Builder()
                         .target(LatLng(spatialPose.latitude, spatialPose.longitude))
                         .zoom(14.8)
-                        .bearing(spatialPose.azimuthDegrees.toDouble())
+                        .bearing(spatialPose.courseDegrees.toDouble())
                         .tilt(30.0)
                         .build()
                 ),
@@ -120,7 +131,7 @@ fun OpenFreeMapComposeView(
     }
 
     // Focus the requested POI even when it was selected from a list outside the map.
-    LaunchedEffect(focusTrigger, focusedPoiId, mapLibreInstance, isStyleReady) {
+    LaunchedEffect(focusTrigger, focusedPoiId, pois, mapLibreInstance, isStyleReady) {
         val map = mapLibreInstance ?: return@LaunchedEffect
         if (!isStyleReady || focusedPoiId == null) return@LaunchedEffect
         val focusedPoi = pois.firstOrNull { it.id == focusedPoiId } ?: return@LaunchedEffect
@@ -137,29 +148,72 @@ fun OpenFreeMapComposeView(
         )
     }
 
-    LaunchedEffect(navigationRoute?.routeId, mapLibreInstance, isStyleReady) {
+    LaunchedEffect(navigationRoute?.routeId, navigationSessionKey, mapLibreInstance, isStyleReady) {
+        val sessionKey = navigationSessionKey
+        if (sessionKey == null) {
+            fittedNavigationSession = null
+            return@LaunchedEffect
+        }
+        if (fittedNavigationSession == sessionKey) return@LaunchedEffect
         val route = navigationRoute ?: return@LaunchedEffect
         val map = mapLibreInstance ?: return@LaunchedEffect
         if (!isStyleReady || route.coordinates.isEmpty()) return@LaunchedEffect
 
-        val points = route.coordinates.map { LatLng(it.latitude, it.longitude) }
-        if (points.size >= 2) {
-            val boundsBuilder = LatLngBounds.Builder()
-            points.forEach { boundsBuilder.include(it) }
-            map.animateCamera(
-                CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 96),
-                850
-            )
-        } else {
-            map.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(points.first(), 15.0),
-                750
-            )
-        }
+        fittedNavigationSession = sessionKey
+        map.animateCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(LatLng(spatialPose.latitude, spatialPose.longitude))
+                    .zoom(16.8)
+                    .bearing(spatialPose.courseDegrees.toDouble())
+                    .tilt(45.0)
+                    .build()
+            ),
+            750
+        )
+    }
+
+    // Keep the user's live location centered while navigation is active, as in turn-by-turn map apps.
+    LaunchedEffect(
+        spatialPose.latitude,
+        spatialPose.longitude,
+        spatialPose.courseDegrees,
+        spatialPose.hasFreshGpsFix,
+        isNavigationActive,
+        mapLibreInstance,
+        isStyleReady
+    ) {
+        val map = mapLibreInstance ?: return@LaunchedEffect
+        if (!isStyleReady || !isNavigationActive || !spatialPose.hasFreshGpsFix) return@LaunchedEffect
+
+        map.animateCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(LatLng(spatialPose.latitude, spatialPose.longitude))
+                    .zoom(17.0)
+                    .bearing(spatialPose.courseDegrees.toDouble())
+                    .tilt(48.0)
+                    .build()
+            ),
+            650
+        )
     }
 
     // Update GeoJSON sources whenever POIs, selectedPOI, or GPS pose changes
-    LaunchedEffect(spatialPose.latitude, spatialPose.longitude, pois, selectedPoiId, focusedPoiId, navigationRoute, isStyleReady) {
+    LaunchedEffect(
+        spatialPose.latitude,
+        spatialPose.longitude,
+        spatialPose.courseDegrees,
+        spatialPose.hasFreshGpsFix,
+        spatialPose.isSimulatedLocation,
+        pois,
+        selectedPoiId,
+        focusedPoiId,
+        navigationRoute,
+        navigationTravelMode,
+        isNavigationActive,
+        isStyleReady
+    ) {
         val map = mapLibreInstance ?: return@LaunchedEffect
         val style = map.style ?: return@LaunchedEffect
         if (!isStyleReady) return@LaunchedEffect
@@ -169,7 +223,9 @@ fun OpenFreeMapComposeView(
             spatialPose = spatialPose,
             pois = pois,
             selectedPoiId = selectedPoiId,
-            navigationRoute = navigationRoute
+            navigationRoute = navigationRoute,
+            navigationTravelMode = navigationTravelMode,
+            isNavigationActive = isNavigationActive
         )
 
         if (!hasCenteredInitially) {
@@ -200,10 +256,12 @@ fun OpenFreeMapComposeView(
                             isStyleReady = true
                             updateGeoJsonLayers(
                                 style = fallbackStyle,
-                                spatialPose = spatialPose,
+                                spatialPose = currentSpatialPose,
                                 pois = currentPois,
-                                selectedPoiId = selectedPoiId,
-                                navigationRoute = currentNavigationRoute
+                                selectedPoiId = currentSelectedPoiId,
+                                navigationRoute = currentNavigationRoute,
+                                navigationTravelMode = currentNavigationTravelMode,
+                                isNavigationActive = currentIsNavigationActive
                             )
                         }
                     }
@@ -222,17 +280,23 @@ fun OpenFreeMapComposeView(
                                 isStyleReady = true
                                 updateGeoJsonLayers(
                                     style = style,
-                                    spatialPose = spatialPose,
+                                    spatialPose = currentSpatialPose,
                                     pois = currentPois,
-                                    selectedPoiId = selectedPoiId,
-                                    navigationRoute = currentNavigationRoute
+                                    selectedPoiId = currentSelectedPoiId,
+                                    navigationRoute = currentNavigationRoute,
+                                    navigationTravelMode = currentNavigationTravelMode,
+                                    isNavigationActive = currentIsNavigationActive
                                 )
                             }
                         )
 
                         map.addOnMapClickListener { tapLatLng ->
                             val screenPoint = map.projection.toScreenLocation(tapLatLng)
-                            val features = map.queryRenderedFeatures(screenPoint, LAYER_POI_PINS)
+                            val features = map.queryRenderedFeatures(
+                                screenPoint,
+                                LAYER_POI_SELECTED,
+                                LAYER_POI_PINS
+                            )
                             val tappedId = features.firstOrNull()?.getStringProperty(PROP_POI_ID)
                             if (tappedId != null) {
                                 currentPois.firstOrNull { it.id == tappedId }?.let { matched ->
@@ -240,15 +304,20 @@ fun OpenFreeMapComposeView(
                                     return@addOnMapClickListener true
                                 }
                             }
-                            // Fallback proximity check if symbol hitbox was slightly missed
-                            val closest = currentPois.minByOrNull { pin ->
-                                abs(pin.latitude - tapLatLng.latitude) + abs(pin.longitude - tapLatLng.longitude)
-                            }
-                            if (closest != null &&
-                                abs(closest.latitude - tapLatLng.latitude) < 0.0008 &&
-                                abs(closest.longitude - tapLatLng.longitude) < 0.0008
-                            ) {
-                                currentOnPoiClick(closest)
+                            // Use screen-space distance so the hit target stays consistent at every zoom level.
+                            val closest = currentPois
+                                .map { pin ->
+                                    val pinPoint = map.projection.toScreenLocation(
+                                        LatLng(pin.latitude, pin.longitude)
+                                    )
+                                    val dx = pinPoint.x - screenPoint.x
+                                    val dy = pinPoint.y - screenPoint.y
+                                    pin to (dx * dx + dy * dy)
+                                }
+                                .minByOrNull { it.second }
+                            val maxTapDistancePx = 48f * density
+                            if (closest != null && closest.second <= maxTapDistancePx * maxTapDistancePx) {
+                                currentOnPoiClick(closest.first)
                                 true
                             } else {
                                 false
@@ -264,9 +333,14 @@ fun OpenFreeMapComposeView(
 private const val SOURCE_USER_GPS = "source-user-gps"
 private const val LAYER_USER_GPS = "layer-user-gps"
 private const val ICON_USER_GPS = "icon-user-gps"
+private const val ICON_NAVIGATION_WALKING = "icon-navigation-walking"
+private const val ICON_NAVIGATION_CAR = "icon-navigation-car"
+private const val ICON_NAVIGATION_MOTORCYCLE = "icon-navigation-motorcycle"
 
 private const val SOURCE_POI_PINS = "source-poi-pins"
 private const val LAYER_POI_PINS = "layer-poi-pins"
+private const val SOURCE_POI_SELECTED = "source-poi-selected"
+private const val LAYER_POI_SELECTED = "layer-poi-selected"
 private const val ICON_POI_LOCKED = "icon-poi-locked"
 private const val ICON_POI_FOOD = "icon-poi-food"
 private const val ICON_POI_UNLOCKED = "icon-poi-unlocked"
@@ -278,6 +352,8 @@ private const val LAYER_NAVIGATION_ROUTE = "layer-navigation-route"
 private const val PROP_POI_ID = "poi_id"
 private const val PROP_POI_TITLE = "poi_title"
 private const val PROP_POI_ICON = "poi_icon"
+private const val PROP_GPS_ICON = "gps_icon"
+private const val PROP_GPS_COURSE = "gps_course"
 
 /**
  * Loads `OpenFreeMap/Bright` vector style (`https://tiles.openfreemap.org/styles/bright`).
@@ -325,6 +401,9 @@ fun buildOpenStreetMapFallbackStyleJson(): String = """
 private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     val density = context.resources.displayMetrics.density
     style.addImage(ICON_USER_GPS, createUserGpsDotBitmap(density))
+    style.addImage(ICON_NAVIGATION_WALKING, createNavigationMarkerBitmap(density, NavigationTravelMode.WALKING))
+    style.addImage(ICON_NAVIGATION_CAR, createNavigationMarkerBitmap(density, NavigationTravelMode.CAR))
+    style.addImage(ICON_NAVIGATION_MOTORCYCLE, createNavigationMarkerBitmap(density, NavigationTravelMode.MOTORCYCLE))
     style.addImage(ICON_POI_LOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#0284C7"), ringColor = Color.WHITE))
     style.addImage(ICON_POI_FOOD, createPoiPinBitmap(density, fillColor = Color.parseColor("#E11D48"), ringColor = Color.parseColor("#FFE4E6")))
     style.addImage(ICON_POI_UNLOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#16A34A"), ringColor = Color.parseColor("#BBF7D0")))
@@ -343,19 +422,6 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
         )
     }
 
-    if (style.getSource(SOURCE_USER_GPS) == null) {
-        style.addSource(GeoJsonSource(SOURCE_USER_GPS))
-    }
-    if (style.getLayer(LAYER_USER_GPS) == null) {
-        style.addLayer(
-            SymbolLayer(LAYER_USER_GPS, SOURCE_USER_GPS).withProperties(
-                iconImage(ICON_USER_GPS),
-                iconAllowOverlap(true),
-                iconIgnorePlacement(true)
-            )
-        )
-    }
-
     if (style.getSource(SOURCE_POI_PINS) == null) {
         style.addSource(GeoJsonSource(SOURCE_POI_PINS))
     }
@@ -365,12 +431,43 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
                 iconImage("{$PROP_POI_ICON}"),
                 iconAllowOverlap(true),
                 iconIgnorePlacement(true),
+                iconPadding(14f),
                 textField("{$PROP_POI_TITLE}"),
                 textSize(12.5f),
                 textOffset(arrayOf(0f, 1.8f)),
                 textColor(Color.parseColor("#0F172A")),
                 textHaloColor(Color.WHITE),
                 textHaloWidth(1.8f)
+            )
+        )
+    }
+
+    if (style.getSource(SOURCE_POI_SELECTED) == null) {
+        style.addSource(GeoJsonSource(SOURCE_POI_SELECTED))
+    }
+    if (style.getLayer(LAYER_POI_SELECTED) == null) {
+        style.addLayer(
+            SymbolLayer(LAYER_POI_SELECTED, SOURCE_POI_SELECTED).withProperties(
+                iconImage(ICON_POI_SELECTED),
+                iconSize(1.28f),
+                iconAllowOverlap(true),
+                iconIgnorePlacement(true)
+            )
+        )
+    }
+
+    // Add GPS last so both the live location and route icon remain above POI markers.
+    if (style.getSource(SOURCE_USER_GPS) == null) {
+        style.addSource(GeoJsonSource(SOURCE_USER_GPS))
+    }
+    if (style.getLayer(LAYER_USER_GPS) == null) {
+        style.addLayer(
+            SymbolLayer(LAYER_USER_GPS, SOURCE_USER_GPS).withProperties(
+                iconImage("{$PROP_GPS_ICON}"),
+                iconRotate(Expression.get(PROP_GPS_COURSE)),
+                iconRotationAlignment("map"),
+                iconAllowOverlap(true),
+                iconIgnorePlacement(true)
             )
         )
     }
@@ -381,7 +478,9 @@ private fun updateGeoJsonLayers(
     spatialPose: DeviceSpatialPose,
     pois: List<PoiPinSummaryDto>,
     selectedPoiId: String?,
-    navigationRoute: ActiveNavigationRoute?
+    navigationRoute: ActiveNavigationRoute?,
+    navigationTravelMode: NavigationTravelMode,
+    isNavigationActive: Boolean
 ) {
     val routeSource = style.getSourceAs<GeoJsonSource>(SOURCE_NAVIGATION_ROUTE)
     val routePoints = navigationRoute?.coordinates.orEmpty().map {
@@ -394,9 +493,25 @@ private fun updateGeoJsonLayers(
     }
 
     val gpsSource = style.getSourceAs<GeoJsonSource>(SOURCE_USER_GPS)
-    gpsSource?.setGeoJson(
-        Feature.fromGeometry(Point.fromLngLat(spatialPose.longitude, spatialPose.latitude))
-    )
+    if (spatialPose.hasFreshGpsFix || spatialPose.isSimulatedLocation) {
+        val navigationIcon = when (navigationTravelMode) {
+            NavigationTravelMode.WALKING -> ICON_NAVIGATION_WALKING
+            NavigationTravelMode.CAR -> ICON_NAVIGATION_CAR
+            NavigationTravelMode.MOTORCYCLE -> ICON_NAVIGATION_MOTORCYCLE
+        }
+        val gpsProperties = JsonObject().apply {
+            addProperty(PROP_GPS_ICON, if (isNavigationActive) navigationIcon else ICON_USER_GPS)
+            addProperty(PROP_GPS_COURSE, spatialPose.courseDegrees.toDouble())
+        }
+        gpsSource?.setGeoJson(
+            Feature.fromGeometry(
+                Point.fromLngLat(spatialPose.longitude, spatialPose.latitude),
+                gpsProperties
+            )
+        )
+    } else {
+        gpsSource?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+    }
 
     val poiSource = style.getSourceAs<GeoJsonSource>(SOURCE_POI_PINS)
     val features = pois.map { poi ->
@@ -413,7 +528,6 @@ private fun updateGeoJsonLayers(
             poi.category.contains("Food", ignoreCase = true) ||
             poi.category.contains("Ẩm thực", ignoreCase = true)
         val iconKey = when {
-            poi.id == selectedPoiId -> ICON_POI_SELECTED
             isUnlocked -> ICON_POI_UNLOCKED
             isFood -> ICON_POI_FOOD
             else -> ICON_POI_LOCKED
@@ -426,6 +540,23 @@ private fun updateGeoJsonLayers(
         Feature.fromGeometry(Point.fromLngLat(poi.longitude, poi.latitude), props)
     }
     poiSource?.setGeoJson(FeatureCollection.fromFeatures(features))
+
+    val selectedPoi = pois.firstOrNull { it.id == selectedPoiId }
+    val selectedSource = style.getSourceAs<GeoJsonSource>(SOURCE_POI_SELECTED)
+    if (selectedPoi != null) {
+        val selectedProperties = JsonObject().apply {
+            addProperty(PROP_POI_ID, selectedPoi.id)
+            addProperty(PROP_POI_TITLE, selectedPoi.title)
+        }
+        selectedSource?.setGeoJson(
+            Feature.fromGeometry(
+                Point.fromLngLat(selectedPoi.longitude, selectedPoi.latitude),
+                selectedProperties
+            )
+        )
+    } else {
+        selectedSource?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+    }
 }
 
 private fun createUserGpsDotBitmap(density: Float): Bitmap {
@@ -451,6 +582,115 @@ private fun createUserGpsDotBitmap(density: Float): Bitmap {
         style = Paint.Style.FILL
     }
     canvas.drawCircle(center, center, center * 0.46f, dotPaint)
+
+    return bitmap
+}
+
+private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelMode): Bitmap {
+    val sizePx = (50 * density).toInt().coerceAtLeast(50)
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val center = sizePx / 2f
+    val blue = Color.parseColor("#2563EB")
+
+    canvas.drawCircle(
+        center,
+        center,
+        center * 0.96f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(55, 15, 23, 42)
+            style = Paint.Style.FILL
+        }
+    )
+    canvas.drawCircle(
+        center,
+        center,
+        center * 0.87f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+    )
+    canvas.drawCircle(
+        center,
+        center,
+        center * 0.74f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = blue
+            style = Paint.Style.FILL
+        }
+    )
+
+    val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = sizePx * 0.065f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    val fillGlyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
+    val path = Path()
+
+    when (mode) {
+        NavigationTravelMode.WALKING -> {
+            canvas.drawCircle(center, center * 0.46f, center * 0.105f, fillGlyph)
+            canvas.drawLine(center, center * 0.59f, center, center * 1.05f, glyph)
+            canvas.drawLine(center, center * 0.72f, center * 0.72f, center * 0.91f, glyph)
+            canvas.drawLine(center, center * 0.72f, center * 1.28f, center * 0.91f, glyph)
+            canvas.drawLine(center, center * 1.03f, center * 0.77f, center * 1.35f, glyph)
+            canvas.drawLine(center, center * 1.03f, center * 1.23f, center * 1.35f, glyph)
+        }
+
+        NavigationTravelMode.CAR -> {
+            val body = RectF(center * 0.58f, center * 0.39f, center * 1.42f, center * 1.58f)
+            canvas.drawRoundRect(body, center * 0.20f, center * 0.20f, fillGlyph)
+            canvas.drawRoundRect(
+                RectF(center * 0.72f, center * 0.61f, center * 1.28f, center * 0.91f),
+                center * 0.08f,
+                center * 0.08f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = blue
+                    style = Paint.Style.FILL
+                }
+            )
+            canvas.drawRoundRect(
+                RectF(center * 0.75f, center * 1.04f, center * 1.25f, center * 1.34f),
+                center * 0.06f,
+                center * 0.06f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = blue
+                    style = Paint.Style.FILL
+                }
+            )
+        }
+
+        NavigationTravelMode.MOTORCYCLE -> {
+            val wheelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = sizePx * 0.055f
+            }
+            canvas.drawCircle(center, center * 0.48f, center * 0.12f, wheelPaint)
+            canvas.drawCircle(center, center * 1.48f, center * 0.12f, wheelPaint)
+            path.moveTo(center, center * 0.48f)
+            path.lineTo(center * 0.72f, center * 0.93f)
+            path.lineTo(center, center * 1.21f)
+            path.lineTo(center * 1.28f, center * 0.77f)
+            path.lineTo(center * 1.48f, center * 1.48f)
+            path.moveTo(center * 0.72f, center * 0.93f)
+            path.lineTo(center * 0.5f, center * 1.40f)
+            canvas.drawPath(path, glyph)
+            canvas.drawRoundRect(
+                RectF(center * 0.82f, center * 0.68f, center * 1.18f, center * 0.86f),
+                center * 0.08f,
+                center * 0.08f,
+                fillGlyph
+            )
+        }
+    }
 
     return bitmap
 }
