@@ -53,6 +53,28 @@ public static class ArExperienceEndpoints
             .RequireAuthorization(AuthPolicies.AdminOrSuperAdmin)
             .WithTags("Admin - AR Experience");
 
+        adminGroup.MapGet("/ar-models", async (
+            IArExperienceService arExperienceService,
+            CancellationToken ct) =>
+        {
+            var result = await arExperienceService.GetArModelLibraryAsync(ct);
+            return result.IsSuccess
+                ? Results.Ok(result.Value)
+                : ToErrorResult(result.Error);
+        });
+
+        adminGroup.MapPost("/pois/{poiId:guid}/placed-ar-model", async (
+            Guid poiId,
+            [FromBody] PlaceArModelRequest request,
+            IArExperienceService arExperienceService,
+            CancellationToken ct) =>
+        {
+            var result = await arExperienceService.PlaceExistingModelAsync(poiId, request, ct);
+            return result.IsSuccess
+                ? Results.Created($"/api/v1/admin/ar-cards/{result.Value.Id}", result.Value)
+                : ToErrorResult(result.Error);
+        });
+
         adminGroup.MapGet("/pois/{poiId:guid}/ar-cards", async (
             Guid poiId,
             IArExperienceService arExperienceService,

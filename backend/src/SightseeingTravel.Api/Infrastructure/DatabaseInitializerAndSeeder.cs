@@ -46,6 +46,26 @@ public static class DatabaseInitializerAndSeeder
             await attractionsDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
         }
 
+        var arModelMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0003_ArCard3dModel.sql")
+            ?? throw new InvalidOperationException("AR 3D model migration resource is missing.");
+        await using (arModelMigration)
+        using (var reader = new StreamReader(arModelMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
+        var arPlacementMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0004_ArCardModelPlacement.sql")
+            ?? throw new InvalidOperationException("AR model placement migration resource is missing.");
+        await using (arPlacementMigration)
+        using (var reader = new StreamReader(arPlacementMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users

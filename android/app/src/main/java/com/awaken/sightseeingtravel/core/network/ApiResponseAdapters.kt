@@ -123,7 +123,9 @@ internal object ApiResponseAdapters {
                 azimuthDegrees = value.double("azimuthDegrees").toFloat(),
                 elevationMeters = value.double("elevationMeters", default = 2.0).toFloat(),
                 anchorDistanceMeters = value.double("distanceMeters", "anchorDistanceMeters", default = 8.0).toFloat(),
-                displayOrder = value.int("displayOrder")
+                displayOrder = value.int("displayOrder"),
+                modelUrl = value.nullableString("modelUrl"),
+                modelRotationDegrees = value.double("modelRotationDegrees", default = 0.0).toFloat()
             )
         }
     }

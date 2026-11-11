@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using SightseeingTravel.Api.Infrastructure;
@@ -30,6 +31,16 @@ builder.Services.AddHttpClient("OsrmWalkingRouting", client =>
     client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
     client.Timeout = TimeSpan.FromSeconds(20);
 });
+builder.Services.Configure<ArModelProcessingOptions>(
+    builder.Configuration.GetSection(ArModelProcessingOptions.SectionName));
+builder.Services.AddHttpClient("NodeOdm", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(45);
+});
+builder.Services.Configure<FormOptions>(options =>
+    options.MultipartBodyLengthLimit = 130L * 1024 * 1024);
+builder.Services.AddScoped<IArModelTaskSubmissionService, ArModelTaskSubmissionService>();
+builder.Services.AddHostedService<ArModelProcessingWorker>();
 
 builder.Services.Configure<ContaboStorageOptions>(
     builder.Configuration.GetSection(ContaboStorageOptions.SectionName));
@@ -156,6 +167,7 @@ app.MapGet("/api/v1/health", () => Results.Ok(new
 app.MapIdentityEndpoints();
 app.MapAttractionsEndpoints();
 app.MapArExperienceEndpoints();
+app.MapArModelProcessingEndpoints();
 app.MapCommunityMediaEndpoints();
 app.MapNavigationEndpoints();
 

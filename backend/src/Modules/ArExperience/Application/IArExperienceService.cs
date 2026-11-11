@@ -15,6 +15,14 @@ public interface IArExperienceService
         Guid poiId,
         CancellationToken ct = default);
 
+    Task<Result<IReadOnlyList<ArModelLibraryItemDto>>> GetArModelLibraryAsync(
+        CancellationToken ct = default);
+
+    Task<Result<AdminArInfoCardDto>> PlaceExistingModelAsync(
+        Guid poiId,
+        PlaceArModelRequest request,
+        CancellationToken ct = default);
+
     Task<Result<AdminArInfoCardDto>> CreateArCardAsync(
         Guid poiId,
         UpsertArInfoCardRequest request,

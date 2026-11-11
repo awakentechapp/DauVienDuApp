@@ -157,6 +157,15 @@ interface SightseeingApiService {
         @Path("poiId") poiId: String
     ): ApiEnvelope<List<AdminArInfoCardDto>>
 
+    @GET("api/v1/admin/ar-models")
+    suspend fun getAdminArModelLibrary(): Response<List<ArModelLibraryItemDto>>
+
+    @POST("api/v1/admin/pois/{poiId}/placed-ar-model")
+    suspend fun placeExistingArModel(
+        @Path("poiId") poiId: String,
+        @Body request: PlaceArModelRequest
+    ): Response<AdminArInfoCardDto>
+
     @POST("api/v1/admin/pois/{poiId}/ar-cards")
     suspend fun createArInfoCard(
         @Path("poiId") poiId: String,
@@ -173,6 +182,18 @@ interface SightseeingApiService {
     suspend fun deleteArInfoCard(
         @Path("cardId") cardId: String
     ): Response<ResponseBody>
+
+    @Multipart
+    @POST("api/v1/admin/ar-cards/{cardId}/3d-model")
+    suspend fun submitArCard3dModel(
+        @Path("cardId") cardId: String,
+        @Part images: List<MultipartBody.Part>
+    ): Response<ArModelBuildSubmissionDto>
+
+    @GET("api/v1/admin/ar-cards/{cardId}/3d-model-status")
+    suspend fun getArCard3dModelStatus(
+        @Path("cardId") cardId: String
+    ): Response<ArModelBuildStatusDto>
 
     /**
      * SuperAdmin ONLY: Approves a `PendingApproval` POI and sets status to `Published`

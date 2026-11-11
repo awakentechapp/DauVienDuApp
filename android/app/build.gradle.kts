@@ -11,8 +11,8 @@ android {
         applicationId = "com.awaken.sightseeingtravel"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 8
+        versionName = "1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -97,6 +97,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
     implementation("androidx.camera:camera-view:$cameraXVersion")
     implementation("com.google.ar:core:1.44.0")
+    implementation("io.github.sceneview:arsceneview:2.2.1")
 
     // Networking (Retrofit2 + OkHttp3 + Gson)
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

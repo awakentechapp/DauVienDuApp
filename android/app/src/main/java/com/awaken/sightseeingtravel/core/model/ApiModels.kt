@@ -213,7 +213,9 @@ data class ArInfoCardDto(
     @SerializedName("azimuthDegrees") val azimuthDegrees: Float = 0f,
     @SerializedName("elevationMeters") val elevationMeters: Float = 2.0f,
     @SerializedName("anchorDistanceMeters") val anchorDistanceMeters: Float = 8.0f,
-    @SerializedName("displayOrder") val displayOrder: Int = 0
+    @SerializedName("displayOrder") val displayOrder: Int = 0,
+    @SerializedName("modelUrl") val modelUrl: String? = null,
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float = 0f
 )
 
 /**
@@ -334,7 +336,39 @@ data class AdminArInfoCardDto(
     @SerializedName("elevationMeters") val elevationMeters: Double,
     @SerializedName("displayOrder") val displayOrder: Int,
     @SerializedName("isActive") val isActive: Boolean,
-    @SerializedName("localizations") val localizations: List<ArCardLocalizationInputDto> = emptyList()
+    @SerializedName("localizations") val localizations: List<ArCardLocalizationInputDto> = emptyList(),
+    @SerializedName("modelStatus") val modelStatus: String = "None",
+    @SerializedName("modelError") val modelError: String? = null,
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Double = 0.0
+)
+
+data class ArModelLibraryItemDto(
+    @SerializedName("sourceCardId") val sourceCardId: String,
+    @SerializedName("sourcePoiId") val sourcePoiId: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("modelUrl") val modelUrl: String,
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float = 0f
+)
+
+data class PlaceArModelRequest(
+    @SerializedName("sourceCardId") val sourceCardId: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("azimuthDegrees") val azimuthDegrees: Float,
+    @SerializedName("distanceMeters") val distanceMeters: Float,
+    @SerializedName("elevationMeters") val elevationMeters: Float,
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float
+)
+
+data class ArModelBuildSubmissionDto(
+    @SerializedName("cardId") val cardId: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String
+)
+
+data class ArModelBuildStatusDto(
+    @SerializedName("cardId") val cardId: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("errorMessage") val errorMessage: String? = null
 )
 
 data class CreateOrUpdatePoiRequest(

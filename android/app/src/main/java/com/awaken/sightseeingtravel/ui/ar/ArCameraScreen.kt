@@ -1,19 +1,26 @@
 package com.awaken.sightseeingtravel.ui.ar
 
 import android.content.Context
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.media.Image
+import android.graphics.ImageFormat
+import android.graphics.YuvImage
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -25,43 +32,63 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.graphics.drawable.toBitmap
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.awaken.sightseeingtravel.core.model.ArInfoCardDto
 import com.awaken.sightseeingtravel.core.model.CommunityPhotoDto
 import com.awaken.sightseeingtravel.core.model.PhotoAnchorSnapshot
 import com.awaken.sightseeingtravel.core.model.PoiArContextDto
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
+import com.google.ar.core.Frame
+import com.google.ar.core.Pose
+import com.google.ar.core.TrackingState
+import io.github.sceneview.ar.ARScene
+import io.github.sceneview.ar.node.AnchorNode
+import io.github.sceneview.node.ImageNode
+import io.github.sceneview.node.ModelNode
+import io.github.sceneview.model.ModelInstance
+import io.github.sceneview.math.Position
+import io.github.sceneview.math.Rotation
+import io.github.sceneview.rememberEngine
+import io.github.sceneview.rememberModelLoader
+import io.github.sceneview.rememberMaterialLoader
+import io.github.sceneview.rememberNodes
+import io.github.sceneview.rememberOnGestureListener
+import io.github.sceneview.math.Size
 import java.io.File
-import kotlin.math.atan2
-import kotlin.math.abs
+import java.io.ByteArrayOutputStream
 import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
-private const val HORIZONTAL_FOV_DEGREES = 64f
-private const val VERTICAL_FOV_DEGREES = 48f
+private const val EARTH_RADIUS_METERS = 6_371_000.0
 
 /**
  * Spatial AR Camera Screen combining:
- * 1. CameraX Live Camera Preview + High-Res Photo Capture (`ImageCapture`)
- * 2. Live Sensor 3D Orientation Projection (`TYPE_ROTATION_VECTOR`) gated by a fresh GPS geofence
- * 3. Directionally anchored AR Info Cards, shown only when the camera aligns with their saved bearing
- * 4. Floating Top 10 Highlighted Community Photos (`highlightedCommunityPhotos`) anchored around the POI
- * 5. Tap-to-inspect modal dialogs + Direct Photo Capture & Upload to Contabo Object Storage via Backend API
+ * ARCore camera tracking with GPS-derived world anchors for info cards and community photos.
+ * Each marker is a textured 3D plane anchored for the lifetime of the current AR session.
  */
 @Composable
 fun ArCameraScreen(
@@ -78,12 +105,11 @@ fun ArCameraScreen(
     onCloseAr: () -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val isEn = selectedLanguage.equals("en", ignoreCase = true)
 
-    var viewportSize by remember { mutableStateOf(IntSize(1080, 1920)) }
     var selectedArCard by remember { mutableStateOf<ArInfoCardDto?>(null) }
     var selectedCommunityPhoto by remember { mutableStateOf<CommunityPhotoDto?>(null) }
+    var fullScreenPhoto by remember { mutableStateOf<CommunityPhotoDto?>(null) }
     var showCaptureDialog by remember { mutableStateOf(false) }
     var pendingCapturedFile by remember { mutableStateOf<File?>(null) }
     var pendingCapturedPose by remember { mutableStateOf<PhotoAnchorSnapshot?>(null) }
@@ -97,12 +123,19 @@ fun ArCameraScreen(
     }
     var showReportDialogForPhotoId by remember { mutableStateOf<String?>(null) }
     var reportReasonInput by remember { mutableStateOf("") }
-
-    val imageCapture = remember {
-        ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-            .build()
-    }
+    var arSessionError by remember { mutableStateOf<String?>(null) }
+    var isCapturingPhoto by remember { mutableStateOf(false) }
+    val captureRequested = remember { AtomicBoolean(false) }
+    val engine = rememberEngine()
+    val modelLoader = rememberModelLoader(engine)
+    val materialLoader = rememberMaterialLoader(engine)
+    val childNodes = rememberNodes()
+    var arTargetsInstalled by remember(arContext.poiId) { mutableStateOf(false) }
+    var photoBitmaps by remember { mutableStateOf<Map<String, Bitmap>>(emptyMap()) }
+    var photoBitmapsLoaded by remember { mutableStateOf(false) }
+    val cardModelInstances = remember { mutableStateMapOf<String, ModelInstance>() }
+    var cardModelsLoaded by remember(arContext.poiId) { mutableStateOf(false) }
+    val imageLoader = remember(context) { context.imageLoader }
 
     val effectiveAzimuth = (spatialPose.azimuthDegrees + 360f) % 360f
     val hasUsableGps = spatialPose.hasFreshGpsFix &&
@@ -119,8 +152,50 @@ fun ArCameraScreen(
         arContext.highlightedCommunityPhotos.filter { it.azimuthDegrees != null }.take(10)
     }
 
+    LaunchedEffect(top10Photos) {
+        photoBitmapsLoaded = false
+        photoBitmaps = emptyMap()
+        photoBitmaps = buildMap {
+            top10Photos.forEach { photo ->
+                runCatching {
+                    val request = ImageRequest.Builder(context)
+                        .data(photo.thumbnailUrl ?: photo.imageUrl)
+                        .size(640, 480)
+                        .allowHardware(false)
+                        .build()
+                    val result = imageLoader.execute(request)
+                    result.drawable?.toBitmap(config = Bitmap.Config.ARGB_8888)?.let { source ->
+                        put(photo.id, createSpatialPhotoBitmap(source, photo.caption, photo.highlightRank ?: (top10Photos.indexOf(photo) + 1)))
+                    }
+                }
+            }
+        }
+        photoBitmapsLoaded = true
+    }
+
+    val spatialCardBitmaps = remember(arContext.arInfoCards) {
+        arContext.arInfoCards.associate { it.id to createSpatialInfoCardBitmap(it) }
+    }
+
+    LaunchedEffect(arContext.arInfoCards.map { it.id to it.modelUrl }) {
+        cardModelsLoaded = false
+        cardModelInstances.clear()
+        arContext.arInfoCards.forEach { card ->
+            val modelUrl = card.modelUrl ?: return@forEach
+            runCatching { modelLoader.loadModelInstance(modelUrl) }
+                .getOrNull()
+                ?.let { cardModelInstances[card.id] = it }
+        }
+        cardModelsLoaded = true
+    }
+
     LaunchedEffect(isWithinPoiZone) {
         if (!isWithinPoiZone) {
+            captureRequested.set(false)
+            isCapturingPhoto = false
+            childNodes.toList().forEach { runCatching { it.destroy() } }
+            childNodes.clear()
+            arTargetsInstalled = false
             selectedArCard = null
             selectedCommunityPhoto = null
             showCaptureDialog = false
@@ -128,38 +203,160 @@ fun ArCameraScreen(
         }
     }
 
+    BackHandler(enabled = fullScreenPhoto != null) {
+        fullScreenPhoto = null
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF090D16))
-            .onSizeChanged { viewportSize = it }
     ) {
-        // 1. Live CameraX Preview
-        AndroidView(
+        ARScene(
             modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                val previewView = PreviewView(ctx).apply {
-                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                }
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                cameraProviderFuture.addListener({
+            engine = engine,
+            modelLoader = modelLoader,
+            materialLoader = materialLoader,
+            childNodes = childNodes,
+            planeRenderer = false,
+            onSessionFailed = { error -> arSessionError = error.localizedMessage ?: error.javaClass.simpleName },
+            onSessionUpdated = { session, frame ->
+                if (!arTargetsInstalled && isWithinPoiZone && photoBitmapsLoaded && cardModelsLoaded &&
+                    frame.camera.trackingState == TrackingState.TRACKING
+                ) {
                     runCatching {
-                        val cameraProvider = cameraProviderFuture.get()
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        val cameraPose = frame.camera.pose
+                        val targets = buildList {
+                            arContext.arInfoCards.forEach { card ->
+                                val (latitude, longitude) = destinationCoordinate(
+                                    arContext.latitude,
+                                    arContext.longitude,
+                                    card.azimuthDegrees.toDouble(),
+                                    card.anchorDistanceMeters.toDouble()
+                                )
+                                val modelInstance = cardModelInstances[card.id]
+                                if (modelInstance != null) {
+                                    add(SpatialArImageTarget(
+                                        "card:${card.id}", latitude, longitude, card.elevationMeters,
+                                        0.88f,
+                                        bitmap = null,
+                                        modelInstance = modelInstance,
+                                        label = card.title,
+                                        modelRotationDegrees = card.modelRotationDegrees
+                                    ))
+                                } else {
+                                    spatialCardBitmaps[card.id]?.let { bitmap ->
+                                        add(SpatialArImageTarget("card:${card.id}", latitude, longitude, card.elevationMeters, 0.88f, bitmap))
+                                    }
+                                }
+                            }
+                            top10Photos.forEach { photo ->
+                                val bitmap = photoBitmaps[photo.id] ?: return@forEach
+                                val hasSavedCoordinates = photo.capturedLatitude in -90.0..90.0 &&
+                                    photo.capturedLongitude in -180.0..180.0 &&
+                                    (photo.capturedLatitude != 0.0 || photo.capturedLongitude != 0.0)
+                                val (latitude, longitude) = if (hasSavedCoordinates) {
+                                    photo.capturedLatitude to photo.capturedLongitude
+                                } else {
+                                    destinationCoordinate(
+                                        arContext.latitude,
+                                        arContext.longitude,
+                                        photo.azimuthDegrees?.toDouble() ?: 0.0,
+                                        7.5 + (top10Photos.indexOf(photo).coerceAtLeast(0) % 3) * 1.5
+                                    )
+                                }
+                                add(SpatialArImageTarget("photo:${photo.id}", latitude, longitude, photo.elevationMeters, 0.82f, bitmap))
+                            }
                         }
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview,
-                            imageCapture
-                        )
+                        targets.forEach { target ->
+                            val anchorPose = createGeographicAnchorPose(
+                                cameraPose = cameraPose,
+                                originLatitude = spatialPose.latitude,
+                                originLongitude = spatialPose.longitude,
+                                originHeadingDegrees = effectiveAzimuth,
+                                target = target
+                            )
+                            val anchorNode = AnchorNode(engine, session.createAnchor(anchorPose))
+                            anchorNode.isTouchable = false
+                            val spatialNode = target.modelInstance?.let { modelInstance ->
+                                ModelNode(
+                                    modelInstance = modelInstance,
+                                    scaleToUnits = 1.2f,
+                                    centerOrigin = Position(y = -0.5f)
+                                ).apply {
+                                    name = target.id
+                                    rotation = Rotation(
+                                        y = LocationAndOrientationTracker.signedAngleDeltaDegrees(
+                                            effectiveAzimuth,
+                                            target.modelRotationDegrees
+                                        )
+                                    )
+                                    isTouchable = true
+                                }
+                            } ?: target.bitmap?.let { bitmap ->
+                                val height = (target.widthMeters * bitmap.height / bitmap.width)
+                                    .coerceIn(0.28f, 0.95f)
+                                ImageNode(
+                                    materialLoader = materialLoader,
+                                    bitmap = bitmap,
+                                    size = Size(target.widthMeters, height)
+                                ).apply {
+                                    name = target.id
+                                    isTouchable = true
+                                }
+                            }
+                            if (spatialNode != null) anchorNode.addChildNode(spatialNode)
+                            if (target.modelInstance != null && !target.label.isNullOrBlank()) {
+                                val labelNode = ImageNode(
+                                    materialLoader = materialLoader,
+                                    bitmap = createSpatialModelLabelBitmap(target.label),
+                                    size = Size(1.5f, 0.28f)
+                                ).apply {
+                                    position = Position(y = 1.45f)
+                                    isTouchable = false
+                                }
+                                anchorNode.addChildNode(labelNode)
+                            }
+                            childNodes.add(anchorNode)
+                        }
+                        arTargetsInstalled = true
+                    }.onFailure { arSessionError = it.localizedMessage ?: "Unable to create AR anchors" }
+                }
+
+                if (captureRequested.compareAndSet(true, false)) {
+                    val capturedFile = runCatching { captureArFrameToCacheFile(context, frame) }.getOrNull()
+                    ContextCompat.getMainExecutor(context).execute {
+                        isCapturingPhoto = false
+                        if (capturedFile != null) {
+                            pendingCapturedFile = capturedFile
+                            pendingCapturedPose = PhotoAnchorSnapshot(
+                                latitude = spatialPose.latitude,
+                                longitude = spatialPose.longitude,
+                                azimuthDegrees = effectiveAzimuth,
+                                pitchDegrees = spatialPose.pitchDegrees.coerceIn(-90f, 90f)
+                            )
+                            photoCaptionInput = ""
+                            showCaptureDialog = true
+                        } else {
+                            arSessionError = if (isEn) "Could not capture the AR camera frame." else "Không thể chụp khung hình từ camera AR."
+                        }
                     }
-                }, ContextCompat.getMainExecutor(ctx))
-                previewView
-            }
+                }
+            },
+            onGestureListener = rememberOnGestureListener(
+                onSingleTapConfirmed = { _, node ->
+                    when {
+                        node?.name?.startsWith("card:") == true -> {
+                            val id = node.name!!.removePrefix("card:")
+                            selectedArCard = arContext.arInfoCards.firstOrNull { it.id == id }
+                        }
+                        node?.name?.startsWith("photo:") == true -> {
+                            val id = node.name!!.removePrefix("photo:")
+                            selectedCommunityPhoto = top10Photos.firstOrNull { it.id == id }
+                        }
+                    }
+                }
+            )
         )
 
         // Subtle vignette for HUD readability
@@ -178,59 +375,7 @@ fun ArCameraScreen(
                 )
         )
 
-        // 2. 3D Projected Spatial AR Cultural Info Cards (`arInfoCards`)
-        if (isWithinPoiZone) arContext.arInfoCards.forEach { card ->
-            val projection = projectSpatialAnchorToScreen(
-                viewerAzimuthDeg = effectiveAzimuth,
-                viewerPitchDeg = spatialPose.pitchDegrees,
-                targetAzimuthDeg = card.azimuthDegrees,
-                targetElevationMeters = card.elevationMeters,
-                targetDistanceMeters = card.anchorDistanceMeters,
-                viewportWidthPx = viewportSize.width,
-                viewportHeightPx = viewportSize.height
-            )
-            val headingError = abs(
-                LocationAndOrientationTracker.signedAngleDeltaDegrees(effectiveAzimuth, card.azimuthDegrees)
-            )
-            val verticalAlignment = abs(projection.screenYPx / viewportSize.height - 0.5f) <= 0.22f
-            if (projection.isVisibleInFrustum && headingError <= 12f && verticalAlignment) {
-                SpatialArInfoCardOverlay(
-                    card = card,
-                    screenX = projection.screenXPx,
-                    screenY = projection.screenYPx,
-                    onClick = { selectedArCard = card }
-                )
-            }
-        }
-
-        // 3. 3D Projected Top 10 Highlighted Community Photos (`highlightedCommunityPhotos`)
-        if (isWithinPoiZone) top10Photos.forEachIndexed { index, photo ->
-            val photoAzimuth = photo.azimuthDegrees ?: return@forEachIndexed
-            val projection = projectSpatialAnchorToScreen(
-                viewerAzimuthDeg = effectiveAzimuth,
-                viewerPitchDeg = spatialPose.pitchDegrees,
-                targetAzimuthDeg = photoAzimuth,
-                targetElevationMeters = photo.elevationMeters.coerceIn(-1.5f, 4.0f),
-                targetDistanceMeters = 7.5f + (index % 3) * 1.5f,
-                viewportWidthPx = viewportSize.width,
-                viewportHeightPx = viewportSize.height
-            )
-            val headingError = abs(
-                LocationAndOrientationTracker.signedAngleDeltaDegrees(effectiveAzimuth, photoAzimuth)
-            )
-            val verticalAlignment = abs(projection.screenYPx / viewportSize.height - 0.5f) <= 0.22f
-            if (projection.isVisibleInFrustum && headingError <= 12f && verticalAlignment) {
-                SpatialCommunityPhotoBillboard(
-                    photo = photo,
-                    rank = photo.highlightRank ?: (index + 1),
-                    screenX = projection.screenXPx,
-                    screenY = projection.screenYPx,
-                    onClick = { selectedCommunityPhoto = photo }
-                )
-            }
-        }
-
-        // 4. Top Spatial HUD Header + 360° Radar
+        // Top Spatial HUD Header + 360° Radar
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -313,11 +458,16 @@ fun ArCameraScreen(
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(
                         text = when {
+                            arSessionError != null -> arSessionError!!
                             !hasUsableGps -> if (isEn) "Waiting for an accurate live GPS fix…" else "Đang chờ tín hiệu GPS thực đủ chính xác…"
                             !isWithinPoiZone -> if (isEn) "Move within ${ (arContext.activationRadiusMeters + 20).roundToInt() }m of this POI to scan its AR anchors." else "Hãy đến trong phạm vi ${(arContext.activationRadiusMeters + 20).roundToInt()}m để quét các điểm AR đã ghim."
-                            else -> if (isEn) "Point the camera at a saved direction; the AR card appears when aligned." else "Hướng camera vào góc đã ghim; thẻ AR sẽ hiện khi căn đúng hướng."
+                            else -> if (isEn) "Turn toward a saved AR location to see its anchored 3D card or photo." else "Xoay camera về vị trí AR đã ghim để thấy thẻ hoặc ảnh neo trong không gian 3D."
                         },
-                        color = if (isWithinPoiZone) Color(0xFF7DD3FC) else Color(0xFFFACC15),
+                        color = when {
+                            arSessionError != null -> Color(0xFFFCA5A5)
+                            isWithinPoiZone -> Color(0xFF7DD3FC)
+                            else -> Color(0xFFFACC15)
+                        },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -329,7 +479,7 @@ fun ArCameraScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (isEn) "Turn the phone to scan the pinned direction" else "Xoay điện thoại để quét đúng hướng đã ghim",
+                            text = if (isEn) "Anchors stay fixed as you turn the camera" else "Các điểm AR đứng yên khi bạn xoay camera",
                             color = Color(0xFF94A3B8),
                             fontSize = 11.sp,
                             modifier = Modifier.weight(1f)
@@ -337,23 +487,9 @@ fun ArCameraScreen(
 
                         Button(
                             onClick = {
-                                capturePhotoToCacheFile(
-                                    context = context,
-                                    imageCapture = imageCapture,
-                                    onCaptured = { file ->
-                                        pendingCapturedFile = file
-                                        pendingCapturedPose = PhotoAnchorSnapshot(
-                                            latitude = spatialPose.latitude,
-                                            longitude = spatialPose.longitude,
-                                            azimuthDegrees = effectiveAzimuth,
-                                            pitchDegrees = spatialPose.pitchDegrees.coerceIn(-90f, 90f)
-                                        )
-                                        photoCaptionInput = ""
-                                        showCaptureDialog = true
-                                    }
-                                )
+                                if (captureRequested.compareAndSet(false, true)) isCapturingPhoto = true
                             },
-                            enabled = !isUploadingPhoto && isWithinPoiZone,
+                            enabled = !isUploadingPhoto && !isCapturingPhoto && isWithinPoiZone,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
                             shape = RoundedCornerShape(24.dp)
                         ) {
@@ -366,6 +502,8 @@ fun ArCameraScreen(
                             Text(
                                 text = if (isUploadingPhoto) {
                                     if (isEn) "Uploading..." else "Đang tải lên..."
+                                } else if (isCapturingPhoto) {
+                                    if (isEn) "Capturing..." else "Đang chụp..."
                                 } else {
                                     if (isEn) "Capture AR Photo" else "Chụp ảnh tại Pin"
                                 },
@@ -446,7 +584,9 @@ fun ArCameraScreen(
                             model = photo.imageUrl,
                             contentDescription = photo.caption,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable { fullScreenPhoto = photo }
                         )
                         Surface(
                             color = Color(0xFFEAB308),
@@ -472,7 +612,11 @@ fun ArCameraScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "By ${photo.authorDisplayName} • ${photo.createdAt} • Azimuth ${photo.azimuthDegrees?.toInt() ?: "—"}°",
+                        text = if (isEn) {
+                            "${formatCapturedDate(photo.createdAt)} • Azimuth ${photo.azimuthDegrees?.toInt() ?: "—"}°"
+                        } else {
+                            "Ngày chụp ${formatCapturedDate(photo.createdAt)} • Hướng ${photo.azimuthDegrees?.toInt() ?: "—"}°"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -543,6 +687,55 @@ fun ArCameraScreen(
         }
     }
 
+    fullScreenPhoto?.let { photo ->
+        val swipeBackThresholdPx = with(LocalDensity.current) { 88.dp.toPx() }
+        Dialog(
+            onDismissRequest = { fullScreenPhoto = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .pointerInput(photo.id, swipeBackThresholdPx) {
+                        var rightwardDrag = 0f
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { _, dragAmount ->
+                                if (dragAmount > 0f) rightwardDrag += dragAmount
+                            },
+                            onDragEnd = {
+                                if (rightwardDrag >= swipeBackThresholdPx) fullScreenPhoto = null
+                                rightwardDrag = 0f
+                            },
+                            onDragCancel = { rightwardDrag = 0f }
+                        )
+                    }
+            ) {
+                AsyncImage(
+                    model = photo.imageUrl,
+                    contentDescription = photo.caption ?: if (isEn) "Full-screen community photo" else "Ảnh cộng đồng toàn màn hình",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+                IconButton(
+                    onClick = { fullScreenPhoto = null },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .padding(start = 12.dp, top = 8.dp)
+                        .size(48.dp)
+                        .background(Color.Black.copy(alpha = 0.58f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = if (isEn) "Back" else "Quay lại",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    }
+
     // ========================================================================
     // DIALOG 3: UPLOAD CAPTURED PHOTO TO CONTABO OBJECT STORAGE
     // ========================================================================
@@ -566,18 +759,6 @@ fun ArCameraScreen(
                             .height(210.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(Color.Black)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    val capturedPose = pendingCapturedPose
-                    Text(
-                        text = if (capturedPose == null) {
-                            if (isEn) "AR location is unavailable." else "Không lấy được vị trí AR."
-                        } else if (isEn) {
-                            "The image keeps its aspect ratio and is resized to about 300 KB before upload. Saved anchor: ${"%.5f".format(capturedPose.latitude)}, ${"%.5f".format(capturedPose.longitude)} • heading ${capturedPose.azimuthDegrees.toInt()}° • tilt ${capturedPose.pitchDegrees.toInt()}°."
-                        } else {
-                            "Ảnh được giữ nguyên tỷ lệ và scale còn khoảng 300 KB trước khi tải lên. Vị trí neo: ${"%.5f".format(capturedPose.latitude)}, ${"%.5f".format(capturedPose.longitude)} • hướng ${capturedPose.azimuthDegrees.toInt()}° • góc nghiêng ${capturedPose.pitchDegrees.toInt()}°."
-                        },
-                        style = MaterialTheme.typography.bodySmall
                     )
                     if (!uploadErrorMessage.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -667,194 +848,6 @@ fun ArCameraScreen(
 }
 
 /**
- * Floating 3D-projected Cultural Story / Historical Insight Card in AR space.
- */
-@Composable
-private fun SpatialArInfoCardOverlay(
-    card: ArInfoCardDto,
-    screenX: Float,
-    screenY: Float,
-    onClick: () -> Unit
-) {
-    val density = LocalDensity.current
-    val cardWidthPx = with(density) { 230.dp.toPx() }
-    val cardHeightPx = with(density) { 105.dp.toPx() }
-
-    Box(
-        modifier = Modifier
-            .offset {
-                IntOffset(
-                    x = (screenX - cardWidthPx / 2f).roundToInt(),
-                    y = (screenY - cardHeightPx / 2f).roundToInt()
-                )
-            }
-            .width(230.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xDD0F172A),
-                        Color(0xDD1E293B)
-                    )
-                )
-            )
-            .border(1.5.dp, Color(0xFF38BDF8), RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(12.dp)
-    ) {
-        Column {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Surface(
-                    color = Color(0xFF0284C7),
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    Text(
-                        text = card.badgeLabel,
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-                Text(
-                    text = "${card.anchorDistanceMeters.toInt()}m • ${card.azimuthDegrees.toInt()}°",
-                    color = Color(0xFF7DD3FC),
-                    fontSize = 10.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = card.title,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(3.dp))
-
-            Text(
-                text = card.bodyText,
-                color = Color(0xFFE2E8F0),
-                fontSize = 11.5.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-/**
- * Floating 3D-projected Top 10 Highlighted Community Photo frame in AR space.
- */
-@Composable
-private fun SpatialCommunityPhotoBillboard(
-    photo: CommunityPhotoDto,
-    rank: Int,
-    screenX: Float,
-    screenY: Float,
-    onClick: () -> Unit
-) {
-    val density = LocalDensity.current
-    val widthPx = with(density) { 156.dp.toPx() }
-    val heightPx = with(density) { 132.dp.toPx() }
-
-    Box(
-        modifier = Modifier
-            .offset {
-                IntOffset(
-                    x = (screenX - widthPx / 2f).roundToInt(),
-                    y = (screenY - heightPx / 2f).roundToInt()
-                )
-            }
-            .width(156.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xE618181B))
-            .border(1.5.dp, Color(0xFFFACC15), RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(6.dp)
-    ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(82.dp)
-                    .clip(RoundedCornerShape(10.dp))
-            ) {
-                AsyncImage(
-                    model = photo.thumbnailUrl ?: photo.imageUrl,
-                    contentDescription = photo.caption,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                Surface(
-                    color = Color(0xFFFACC15),
-                    shape = RoundedCornerShape(bottomEnd = 8.dp),
-                    modifier = Modifier.align(Alignment.TopStart)
-                ) {
-                    Text(
-                        text = "#$rank",
-                        color = Color.Black,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 10.sp,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-                Surface(
-                    color = Color.Black.copy(alpha = 0.65f),
-                    shape = RoundedCornerShape(topStart = 8.dp),
-                    modifier = Modifier.align(Alignment.BottomEnd)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = null,
-                            tint = Color(0xFFF43F5E),
-                            modifier = Modifier.size(10.dp)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = "${photo.likeCount}",
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = photo.caption ?: photo.authorDisplayName,
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "@${photo.authorDisplayName}",
-                color = Color(0xFFFDE047),
-                fontSize = 9.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-/**
  * 360° Radar HUD displaying the user's current viewing cone and all surrounding
  * AR Info Cards (cyan dots) + Top 10 Highlighted Community Photos (gold dots).
  */
@@ -918,89 +911,291 @@ private fun SpatialRadarHud(
     }
 }
 
-private data class ScreenProjectionResult(
-    val isVisibleInFrustum: Boolean,
-    val screenXPx: Float,
-    val screenYPx: Float
+private data class SpatialArImageTarget(
+    val id: String,
+    val latitude: Double,
+    val longitude: Double,
+    val elevationMeters: Float,
+    val widthMeters: Float,
+    val bitmap: Bitmap?,
+    val modelInstance: ModelInstance? = null,
+    val label: String? = null,
+    val modelRotationDegrees: Float = 0f
 )
 
-/**
- * Projects a 3D spherical anchor (`targetAzimuthDeg`, `targetElevationMeters`, `targetDistanceMeters`)
- * onto 2D screen coordinates `(x, y)` based on the device's live compass yaw and tilt pitch.
- */
-private fun projectSpatialAnchorToScreen(
-    viewerAzimuthDeg: Float,
-    viewerPitchDeg: Float,
-    targetAzimuthDeg: Float,
-    targetElevationMeters: Float,
-    targetDistanceMeters: Float,
-    viewportWidthPx: Int,
-    viewportHeightPx: Int
-): ScreenProjectionResult {
-    val yawDelta = LocationAndOrientationTracker.signedAngleDeltaDegrees(viewerAzimuthDeg, targetAzimuthDeg)
-    val halfHFov = HORIZONTAL_FOV_DEGREES / 2f
-
-    // Allow slightly wider margin so cards smoothly enter/exit screen edges
-    if (kotlin.math.abs(yawDelta) > halfHFov + 14f) {
-        return ScreenProjectionResult(false, 0f, 0f)
-    }
-
-    val safeDistance = targetDistanceMeters.coerceAtLeast(2.0f)
-    val targetElevationAngleDeg = Math.toDegrees(
-        atan2((targetElevationMeters - 1.5f).toDouble(), safeDistance.toDouble())
-    ).toFloat()
-
-    val pitchDelta = targetElevationAngleDeg - viewerPitchDeg
-    val halfVFov = VERTICAL_FOV_DEGREES / 2f
-
-    val normalizedX = 0.5f + (yawDelta / HORIZONTAL_FOV_DEGREES)
-    val normalizedY = (0.5f - (pitchDelta / VERTICAL_FOV_DEGREES)).coerceIn(0.18f, 0.78f)
-
-    if (kotlin.math.abs(pitchDelta) > halfVFov + 35f) {
-        return ScreenProjectionResult(false, 0f, 0f)
-    }
-
-    return ScreenProjectionResult(
-        isVisibleInFrustum = true,
-        screenXPx = normalizedX * viewportWidthPx,
-        screenYPx = normalizedY * viewportHeightPx
+private fun createSpatialModelLabelBitmap(label: String): Bitmap {
+    val bitmap = Bitmap.createBitmap(900, 168, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bitmap)
+    canvas.drawRoundRect(
+        RectF(8f, 8f, 892f, 160f),
+        44f,
+        44f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.argb(225, 15, 23, 42) }
     )
-}
-
-/**
- * Captures a photo via CameraX `ImageCapture` to a temporary file in `cacheDir`
- * for subsequent proportional JPEG compression to about 300 KB and Contabo S3 upload.
- */
-private fun capturePhotoToCacheFile(
-    context: Context,
-    imageCapture: ImageCapture,
-    onCaptured: (File) -> Unit
-) {
-    val outputFile = File(
-        context.cacheDir,
-        "ar_poi_capture_${System.currentTimeMillis()}.jpg"
-    )
-    val outputOptions = ImageCapture.OutputFileOptions.Builder(outputFile).build()
-    imageCapture.takePicture(
-        outputOptions,
-        ContextCompat.getMainExecutor(context),
-        object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                onCaptured(outputFile)
-            }
-
-            override fun onError(exception: ImageCaptureException) {
-                // On emulator or camera-less environment, create a valid placeholder file so the upload flow remains testable
-                runCatching {
-                    val bmp = android.graphics.Bitmap.createBitmap(800, 600, android.graphics.Bitmap.Config.ARGB_8888)
-                    val canvas = android.graphics.Canvas(bmp)
-                    canvas.drawColor(android.graphics.Color.parseColor("#0284C7"))
-                    outputFile.outputStream().use { out ->
-                        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
-                    }
-                    onCaptured(outputFile)
-                }
-            }
+    canvas.drawRoundRect(
+        RectF(10f, 10f, 890f, 158f),
+        42f,
+        42f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(56, 189, 248)
+            style = Paint.Style.STROKE
+            strokeWidth = 8f
         }
     )
+    val safeLabel = label.trim().replace(Regex("\\s+"), " ").take(45)
+    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        textSize = 68f
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+    val textWidth = textPaint.measureText(safeLabel)
+    if (textWidth > 800f) textPaint.textSize *= 800f / textWidth
+    canvas.drawText(safeLabel, bitmap.width / 2f, 108f, textPaint)
+    return bitmap
+}
+
+private fun createSpatialInfoCardBitmap(card: ArInfoCardDto): Bitmap {
+    val bitmap = Bitmap.createBitmap(1000, 620, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bitmap)
+    val background = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(15, 23, 42) }
+    canvas.drawRoundRect(RectF(0f, 0f, 1000f, 620f), 48f, 48f, background)
+    canvas.drawRoundRect(
+        RectF(4f, 4f, 996f, 616f), 44f, 44f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.TRANSPARENT
+            style = Paint.Style.STROKE
+            strokeWidth = 8f
+            setARGB(255, 56, 189, 248)
+        }
+    )
+    canvas.drawRoundRect(
+        RectF(40f, 34f, 400f, 104f), 20f, 20f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(2, 132, 199) }
+    )
+    val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        textSize = 32f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+    canvas.drawText(card.badgeLabel.take(26), 62f, 80f, badgePaint)
+
+    val headingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        textSize = 56f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+    drawWrappedText(canvas, card.title, 50f, 185f, 900f, headingPaint, 62f, 2)
+
+    val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(226, 232, 240)
+        textSize = 34f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+    }
+    drawWrappedText(canvas, card.bodyText, 52f, 330f, 890f, bodyPaint, 48f, 4)
+
+    val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(125, 211, 252)
+        textSize = 30f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+    canvas.drawText("${card.anchorDistanceMeters.toInt()} m  •  ${card.azimuthDegrees.toInt()}°", 54f, 570f, footerPaint)
+    return bitmap
+}
+
+private fun createSpatialPhotoBitmap(source: Bitmap, caption: String?, rank: Int): Bitmap {
+    val bitmap = Bitmap.createBitmap(900, 650, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bitmap)
+    canvas.drawRoundRect(
+        RectF(0f, 0f, 900f, 650f), 36f, 36f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(24, 24, 27) }
+    )
+    val imageBounds = RectF(24f, 24f, 876f, 510f)
+    val scale = min(imageBounds.width() / source.width, imageBounds.height() / source.height)
+    val width = source.width * scale
+    val height = source.height * scale
+    val destination = RectF(
+        imageBounds.centerX() - width / 2f,
+        imageBounds.centerY() - height / 2f,
+        imageBounds.centerX() + width / 2f,
+        imageBounds.centerY() + height / 2f
+    )
+    canvas.drawBitmap(source, null, destination, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+    canvas.drawRoundRect(
+        RectF(30f, 30f, 150f, 108f), 20f, 20f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(250, 204, 21) }
+    )
+    canvas.drawText(
+        "#$rank", 52f, 82f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.BLACK
+            textSize = 40f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+    )
+    canvas.drawRect(
+        RectF(20f, 520f, 880f, 640f),
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(24, 24, 27) }
+    )
+    if (!caption.isNullOrBlank()) {
+        val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = 34f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        drawWrappedText(canvas, caption, 42f, 572f, 810f, captionPaint, 40f, 2)
+    }
+    return bitmap
+}
+
+private fun drawWrappedText(
+    canvas: AndroidCanvas,
+    text: String,
+    startX: Float,
+    startY: Float,
+    maxWidth: Float,
+    paint: Paint,
+    lineHeight: Float,
+    maxLines: Int
+) {
+    var line = ""
+    var lineNumber = 0
+    text.trim().split(Regex("\\s+")).forEach { word ->
+        val candidate = if (line.isEmpty()) word else "$line $word"
+        if (line.isNotEmpty() && paint.measureText(candidate) > maxWidth) {
+            if (lineNumber >= maxLines) return
+            canvas.drawText(line, startX, startY + lineNumber * lineHeight, paint)
+            lineNumber++
+            line = word
+        } else {
+            line = candidate
+        }
+    }
+    if (line.isNotEmpty() && lineNumber < maxLines) {
+        canvas.drawText(line, startX, startY + lineNumber * lineHeight, paint)
+    }
+}
+
+private fun destinationCoordinate(
+    latitude: Double,
+    longitude: Double,
+    bearingDegrees: Double,
+    distanceMeters: Double
+): Pair<Double, Double> {
+    val angularDistance = distanceMeters / EARTH_RADIUS_METERS
+    val bearing = Math.toRadians(bearingDegrees)
+    val lat1 = Math.toRadians(latitude)
+    val lon1 = Math.toRadians(longitude)
+    val lat2 = kotlin.math.asin(
+        sin(lat1) * cos(angularDistance) + cos(lat1) * sin(angularDistance) * cos(bearing)
+    )
+    val lon2 = lon1 + kotlin.math.atan2(
+        sin(bearing) * sin(angularDistance) * cos(lat1),
+        cos(angularDistance) - sin(lat1) * sin(lat2)
+    )
+    return Math.toDegrees(lat2) to ((Math.toDegrees(lon2) + 540.0) % 360.0 - 180.0)
+}
+
+private fun createGeographicAnchorPose(
+    cameraPose: Pose,
+    originLatitude: Double,
+    originLongitude: Double,
+    originHeadingDegrees: Float,
+    target: SpatialArImageTarget
+): Pose {
+    val forward = cameraPose.rotateVector(floatArrayOf(0f, 0f, -1f))
+    val right = cameraPose.rotateVector(floatArrayOf(1f, 0f, 0f))
+    val forwardLength = kotlin.math.sqrt(forward[0] * forward[0] + forward[2] * forward[2]).coerceAtLeast(0.001f)
+    val rightLength = kotlin.math.sqrt(right[0] * right[0] + right[2] * right[2]).coerceAtLeast(0.001f)
+    val fx = forward[0] / forwardLength
+    val fz = forward[2] / forwardLength
+    val rx = right[0] / rightLength
+    val rz = right[2] / rightLength
+    val heading = Math.toRadians(originHeadingDegrees.toDouble())
+    val northX = fx * cos(heading) - rx * sin(heading)
+    val northZ = fz * cos(heading) - rz * sin(heading)
+    val eastX = fx * sin(heading) + rx * cos(heading)
+    val eastZ = fz * sin(heading) + rz * cos(heading)
+
+    val meanLatitude = Math.toRadians((originLatitude + target.latitude) / 2.0)
+    val northMeters = Math.toRadians(target.latitude - originLatitude) * EARTH_RADIUS_METERS
+    val eastMeters = Math.toRadians(target.longitude - originLongitude) * EARTH_RADIUS_METERS * cos(meanLatitude)
+    val translation = cameraPose.translation
+    val worldX = translation[0] + (northMeters * northX + eastMeters * eastX).toFloat()
+    val worldZ = translation[2] + (northMeters * northZ + eastMeters * eastZ).toFloat()
+    val worldY = translation[1] + target.elevationMeters - 1.5f
+
+    return Pose(floatArrayOf(worldX, worldY, worldZ), cameraPose.rotationQuaternion)
+}
+
+private fun formatCapturedDate(timestamp: String): String {
+    if (timestamp.isBlank()) return "—"
+    val localDate = runCatching {
+        OffsetDateTime.parse(timestamp).atZoneSameInstant(ZoneId.systemDefault()).toLocalDate()
+    }.getOrNull()
+        ?: runCatching { Instant.parse(timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrNull()
+        ?: runCatching { LocalDateTime.parse(timestamp).toLocalDate() }.getOrNull()
+        ?: runCatching { LocalDate.parse(timestamp.take(10)) }.getOrNull()
+    return localDate?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ROOT)) ?: timestamp.take(10)
+}
+
+private fun captureArFrameToCacheFile(context: Context, frame: Frame): File {
+    val image = frame.acquireCameraImage()
+    val jpegBytes = try {
+        image.toNv21().let { nv21 ->
+            ByteArrayOutputStream().use { output ->
+                val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+                check(yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 92, output))
+                output.toByteArray()
+            }
+        }
+    } finally {
+        image.close()
+    }
+
+    val decoded = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
+        ?: error("AR camera image could not be decoded")
+    val oriented = if (
+        context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT &&
+        decoded.width > decoded.height
+    ) {
+        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, Matrix().apply { postRotate(90f) }, true)
+            .also { if (it !== decoded) decoded.recycle() }
+    } else decoded
+
+    val file = File(context.cacheDir, "ar_poi_capture_${System.currentTimeMillis()}.jpg")
+    file.outputStream().use { output ->
+        check(oriented.compress(Bitmap.CompressFormat.JPEG, 92, output))
+    }
+    oriented.recycle()
+    return file
+}
+
+private fun Image.toNv21(): ByteArray {
+    val width = this.width
+    val height = this.height
+    val result = ByteArray(width * height * 3 / 2)
+    val yPlane = planes[0]
+    val yBuffer = yPlane.buffer.duplicate()
+    var outputIndex = 0
+    for (row in 0 until height) {
+        val rowStart = row * yPlane.rowStride
+        for (column in 0 until width) {
+            result[outputIndex++] = yBuffer.get(rowStart + column * yPlane.pixelStride)
+        }
+    }
+
+    val uPlane = planes[1]
+    val vPlane = planes[2]
+    val uBuffer = uPlane.buffer.duplicate()
+    val vBuffer = vPlane.buffer.duplicate()
+    for (row in 0 until height / 2) {
+        val uRowStart = row * uPlane.rowStride
+        val vRowStart = row * vPlane.rowStride
+        for (column in 0 until width / 2) {
+            result[outputIndex++] = vBuffer.get(vRowStart + column * vPlane.pixelStride)
+            result[outputIndex++] = uBuffer.get(uRowStart + column * uPlane.pixelStride)
+        }
+    }
+    return result
 }

@@ -232,8 +232,11 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                 currentAzimuthDegrees = spatialPose.azimuthDegrees,
                 adminArCardsByPoi = uiState.adminArCardsByPoi,
                 onCreateFixedArCard = viewModel::createAdminArInfoCard,
+                onLoadArModelLibrary = viewModel::loadAdminArModelLibrary,
+                onPlaceExistingArModel = viewModel::placeExistingArModel,
                 onUpdateArInfoCard = viewModel::updateAdminArInfoCard,
                 onDeleteArInfoCard = viewModel::deleteAdminArInfoCard,
+                onBuildArCard3dModel = viewModel::buildAdminArCard3dModel,
                 onFilterStatusChange = { status ->
                     viewModel.loadAdminConsoleData(status)
                 },

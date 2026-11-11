@@ -18,8 +18,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
 import retrofit2.HttpException
 import java.io.File
@@ -1163,6 +1167,138 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             throw error
         } catch (error: Exception) {
             error.message ?: "Không thể tạo thẻ AR. Vui lòng thử lại."
+        }
+    }
+
+    suspend fun loadAdminArModelLibrary(): List<ArModelLibraryItemDto> {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            throw SecurityException("Chỉ tài khoản Admin hoặc Super Admin mới được dùng kho vật thể AR 3D.")
+        }
+
+        val response = apiService.getAdminArModelLibrary()
+        if (!response.isSuccessful) {
+            throw IllegalStateException("Không thể tải kho vật thể 3D (HTTP ${response.code()}).")
+        }
+        return response.body().orEmpty()
+    }
+
+    suspend fun placeExistingArModel(
+        poiId: String,
+        request: PlaceArModelRequest
+    ): String? {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            return "Chỉ tài khoản Admin hoặc Super Admin mới được đặt vật thể AR 3D."
+        }
+
+        return try {
+            val response = apiService.placeExistingArModel(poiId, request)
+            if (!response.isSuccessful) {
+                return "Không thể lưu vị trí vật thể 3D (HTTP ${response.code()})."
+            }
+            val createdCard = response.body()
+                ?: return "Máy chủ không trả về thẻ AR đã tạo."
+            val refreshedCards = apiService.getAdminArInfoCards(poiId).data
+                ?: (_uiState.value.adminArCardsByPoi[poiId].orEmpty() + createdCard)
+            _uiState.update { state ->
+                state.copy(
+                    adminArCardsByPoi = state.adminArCardsByPoi + (poiId to refreshedCards),
+                    adminPois = state.adminPois.map { poi ->
+                        if (poi.id == poiId) poi.copy(arInfoCardCount = refreshedCards.size) else poi
+                    },
+                    statusBannerMessage = "Đã đặt vật thể 3D và tạo thẻ AR cho địa điểm."
+                )
+            }
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.message ?: "Không thể đặt vật thể 3D. Vui lòng thử lại."
+        }
+    }
+
+    suspend fun buildAdminArCard3dModel(cardId: String, imageFiles: List<File>): String? {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            return "Chỉ tài khoản Admin hoặc Super Admin mới được dựng mô hình AR 3D."
+        }
+        if (imageFiles.size !in 12..32) {
+            return "Cần chụp từ 12 đến 32 ảnh trước khi dựng mô hình."
+        }
+        val totalBytes = imageFiles.sumOf { it.length() }
+        if (totalBytes > 120L * 1024 * 1024) {
+            return "Tổng dung lượng ảnh vượt 120 MB. Hãy bỏ bớt ảnh hoặc chụp lại ở độ phân giải thấp hơn."
+        }
+        if (imageFiles.any { !it.exists() || it.length() == 0L }) {
+            return "Một số ảnh chụp không còn hợp lệ. Hãy chụp lại các ảnh đó."
+        }
+
+        return try {
+            val imageParts = imageFiles.map { image ->
+                val mediaType = if (image.extension.equals("png", ignoreCase = true)) {
+                    "image/png".toMediaTypeOrNull()
+                } else {
+                    "image/jpeg".toMediaTypeOrNull()
+                }
+                MultipartBody.Part.createFormData(
+                    "images",
+                    image.name,
+                    image.asRequestBody(mediaType)
+                )
+            }
+            val response = apiService.submitArCard3dModel(cardId, imageParts)
+            if (!response.isSuccessful) {
+                return "Không gửi được ảnh để dựng mô hình (HTTP ${response.code()})."
+            }
+
+            val body = response.body()
+                ?: return "Máy chủ đã nhận yêu cầu nhưng không trả về trạng thái dựng mô hình."
+            _uiState.update { state ->
+                state.copy(
+                    adminArCardsByPoi = state.adminArCardsByPoi.mapValues { (_, cards) ->
+                        cards.map { card ->
+                            if (card.id == cardId) card.copy(modelStatus = body.status, modelError = null) else card
+                        }
+                    },
+                    statusBannerMessage = body.message
+                )
+            }
+
+            viewModelScope.launch {
+                repeat(180) {
+                    delay(10_000)
+                    try {
+                        val statusResponse = apiService.getArCard3dModelStatus(cardId)
+                        val status = statusResponse.body() ?: return@repeat
+                        _uiState.update { state ->
+                            state.copy(
+                                adminArCardsByPoi = state.adminArCardsByPoi.mapValues { (_, cards) ->
+                                    cards.map { card ->
+                                        if (card.id == cardId) {
+                                            card.copy(modelStatus = status.status, modelError = status.errorMessage)
+                                        } else card
+                                    }
+                                },
+                                statusBannerMessage = when (status.status.lowercase()) {
+                                    "ready" -> "Mô hình 3D đã sẵn sàng trong AR."
+                                    "failed" -> status.errorMessage ?: "Không dựng được mô hình 3D."
+                                    else -> state.statusBannerMessage
+                                }
+                            )
+                        }
+                        if (status.status.equals("Ready", true) || status.status.equals("Failed", true)) {
+                            return@launch
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // Continue polling; temporary network errors should not cancel the server-side build.
+                    }
+                }
+            }
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.message ?: "Không thể gửi ảnh để dựng mô hình 3D."
         }
     }
 

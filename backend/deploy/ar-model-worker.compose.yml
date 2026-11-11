@@ -1,0 +1,13 @@
+services:
+  nodeodm:
+    image: opendronemap/nodeodm:latest
+    container_name: dauviendu-nodeodm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    shm_size: 1gb
+    volumes:
+      - nodeodm-data:/var/www/data
+
+volumes:
+  nodeodm-data:

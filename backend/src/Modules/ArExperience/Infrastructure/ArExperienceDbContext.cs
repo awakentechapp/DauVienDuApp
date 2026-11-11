@@ -50,6 +50,22 @@ public sealed class ArExperienceDbContext : DbContext
             builder.Property(x => x.IsActive)
                 .IsRequired();
 
+            builder.Property(x => x.ModelObjectKey)
+                .HasMaxLength(512);
+
+            builder.Property(x => x.ModelStatus)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            builder.Property(x => x.ModelError)
+                .HasMaxLength(500);
+
+            builder.Property(x => x.NodeOdmTaskId)
+                .HasMaxLength(128);
+
+            builder.Property(x => x.ModelRotationDegrees)
+                .IsRequired();
+
             builder.Property(x => x.CreatedAt)
                 .IsRequired();
 

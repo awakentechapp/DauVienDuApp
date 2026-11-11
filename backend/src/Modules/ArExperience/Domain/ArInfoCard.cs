@@ -27,6 +27,11 @@ public sealed class ArInfoCard : AuditableEntity
     public double ElevationMeters { get; set; }
     public int DisplayOrder { get; set; }
     public bool IsActive { get; set; } = true;
+    public string? ModelObjectKey { get; private set; }
+    public string ModelStatus { get; private set; } = "None";
+    public string? ModelError { get; private set; }
+    public string? NodeOdmTaskId { get; private set; }
+    public double ModelRotationDegrees { get; private set; }
     public List<ArInfoCardLocalization> Localizations { get; set; } = new();
 
     private ArInfoCard()
@@ -188,6 +193,58 @@ public sealed class ArInfoCard : AuditableEntity
         Localizations.Clear();
         Localizations.AddRange(newLocalizations);
         return Result.Success();
+    }
+
+    public void BeginModelProcessing(string nodeOdmTaskId, DateTimeOffset nowUtc)
+    {
+        NodeOdmTaskId = nodeOdmTaskId;
+        ModelStatus = "Processing";
+        ModelError = null;
+        UpdatedAt = nowUtc;
+    }
+
+    public void CompleteModelProcessing(string objectKey, DateTimeOffset nowUtc)
+    {
+        ModelObjectKey = objectKey;
+        ModelStatus = "Ready";
+        ModelError = null;
+        NodeOdmTaskId = null;
+        UpdatedAt = nowUtc;
+    }
+
+    public Result AttachExistingModel(string objectKey, double modelRotationDegrees, DateTimeOffset nowUtc)
+    {
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            return Result.Failure(new Error(
+                "AR_MODEL_OBJECT_REQUIRED",
+                "A ready 3D model object is required.",
+                ErrorType.Validation));
+        }
+
+        if (double.IsNaN(modelRotationDegrees) || double.IsInfinity(modelRotationDegrees))
+        {
+            return Result.Failure(new Error(
+                "AR_MODEL_INVALID_ROTATION",
+                "Model rotation must be a finite number of degrees.",
+                ErrorType.Validation));
+        }
+
+        ModelObjectKey = objectKey;
+        ModelRotationDegrees = ((modelRotationDegrees % 360.0) + 360.0) % 360.0;
+        ModelStatus = "Ready";
+        ModelError = null;
+        NodeOdmTaskId = null;
+        UpdatedAt = nowUtc;
+        return Result.Success();
+    }
+
+    public void FailModelProcessing(string error, DateTimeOffset nowUtc)
+    {
+        ModelStatus = "Failed";
+        ModelError = error.Length <= 500 ? error : error[..500];
+        NodeOdmTaskId = null;
+        UpdatedAt = nowUtc;
     }
 
     public static Result ValidateSpatialPlacement(

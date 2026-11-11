@@ -11,7 +11,9 @@ public sealed record ArInfoCardDto(
     double AzimuthDegrees,
     double DistanceMeters,
     double ElevationMeters,
-    int DisplayOrder);
+    int DisplayOrder,
+    string? ModelUrl = null,
+    double ModelRotationDegrees = 0.0);
 
 public sealed record ArContextResponse(
     Guid PoiId,
@@ -46,4 +48,22 @@ public sealed record AdminArInfoCardDto(
     double ElevationMeters,
     int DisplayOrder,
     bool IsActive,
-    IReadOnlyList<ArCardLocalizationInputDto> Localizations);
+    IReadOnlyList<ArCardLocalizationInputDto> Localizations,
+    string ModelStatus = "None",
+    string? ModelError = null,
+    double ModelRotationDegrees = 0.0);
+
+public sealed record ArModelLibraryItemDto(
+    Guid SourceCardId,
+    Guid SourcePoiId,
+    string Name,
+    string ModelUrl,
+    double ModelRotationDegrees);
+
+public sealed record PlaceArModelRequest(
+    Guid SourceCardId,
+    string Name,
+    double AzimuthDegrees,
+    double DistanceMeters,
+    double ElevationMeters,
+    double ModelRotationDegrees);
