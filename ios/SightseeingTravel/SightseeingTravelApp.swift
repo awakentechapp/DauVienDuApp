@@ -651,6 +651,10 @@ public struct ProfileSettingsView: View {
     @State private var customApiUrl: String = "http://localhost:5000/api/v1"
     @State private var statusBanner: String?
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+    }
+
     public init() {}
 
     public var body: some View {
@@ -781,7 +785,9 @@ public struct ProfileSettingsView: View {
                             Text("Dấu Viễn Du")
                                 .font(.subheadline.weight(.bold))
                                 .foregroundStyle(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0))
-                            Text(appState.selectedLanguage == .vi ? "Dấu viễn du · Phiên bản v1.1" : "Vintage Heritage Stamp · v1.1")
+                            Text(appState.selectedLanguage == .vi
+                                 ? "Dấu viễn du · Phiên bản v\(appVersion)"
+                                 : "Vintage Heritage Stamp · v\(appVersion)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

@@ -4,10 +4,16 @@ public sealed record StorageUploadResult(string ObjectKey, string StorageUrl, lo
 
 public sealed class ObjectStorageUploadException : Exception
 {
-    public ObjectStorageUploadException(string message, Exception innerException)
+    public ObjectStorageUploadException(
+        string message,
+        Exception innerException,
+        string? storageErrorCode = null)
         : base(message, innerException)
     {
+        StorageErrorCode = storageErrorCode;
     }
+
+    public string? StorageErrorCode { get; }
 }
 
 public interface IObjectStorageService

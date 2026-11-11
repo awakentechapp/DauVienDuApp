@@ -169,11 +169,15 @@ public sealed class CommunityMediaService : ICommunityMediaService
                 objectKey,
                 ct);
         }
-        catch (ObjectStorageUploadException)
+        catch (ObjectStorageUploadException exception)
         {
+            var message = exception.StorageErrorCode == "SignatureDoesNotMatch"
+                ? "Contabo Object Storage từ chối chữ ký xác thực. Vui lòng kiểm tra cặp Access Key/Secret Key trong cấu hình máy chủ."
+                : "Không thể lưu ảnh vào kho lưu trữ. Vui lòng thử lại sau.";
+
             return Result.Failure<CommunityPhotoDto>(new Error(
                 "PHOTO_STORAGE_UPLOAD_FAILED",
-                "Không thể lưu ảnh vào kho lưu trữ. Vui lòng thử lại sau.",
+                message,
                 ErrorType.Failure));
         }
 

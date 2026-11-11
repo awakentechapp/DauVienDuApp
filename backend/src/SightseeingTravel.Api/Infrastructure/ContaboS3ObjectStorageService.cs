@@ -87,7 +87,10 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
                 exception.ErrorCode,
                 (int)exception.StatusCode,
                 exception.RequestId);
-            throw new ObjectStorageUploadException("The object storage upload failed.", exception);
+            throw new ObjectStorageUploadException(
+                "The object storage upload failed.",
+                exception,
+                exception.ErrorCode);
         }
 
         var storageUrl = $"{_options.PublicBaseUrl.TrimEnd('/')}/{normalizedKey}";

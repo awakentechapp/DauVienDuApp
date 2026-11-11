@@ -414,11 +414,26 @@ public sealed class AttractionService : IAttractionService
         var objectKey = $"pois/{poi.Id}/official/{fileId}{ext}";
 
         var previousObjectKey = poi.CoverObjectKey;
-        var uploadResult = await _objectStorageService.UploadPhotoAsync(
-            fileStream,
-            resolvedContentType,
-            objectKey,
-            cancellationToken);
+        StorageUploadResult uploadResult;
+        try
+        {
+            uploadResult = await _objectStorageService.UploadPhotoAsync(
+                fileStream,
+                resolvedContentType,
+                objectKey,
+                cancellationToken);
+        }
+        catch (ObjectStorageUploadException exception)
+        {
+            var message = exception.StorageErrorCode == "SignatureDoesNotMatch"
+                ? "Contabo Object Storage từ chối chữ ký xác thực. Vui lòng kiểm tra cặp Access Key/Secret Key trong cấu hình máy chủ."
+                : "Không thể lưu ảnh POI vào kho lưu trữ. Vui lòng thử lại sau.";
+
+            return Result.Failure<AdminPoiDto>(new Error(
+                "POI_COVER_STORAGE_UPLOAD_FAILED",
+                message,
+                ErrorType.Failure));
+        }
 
         poi.SetCoverImage(uploadResult.StorageUrl, uploadResult.ObjectKey, _dateTimeProvider.UtcNow);
         await _dbContext.SaveChangesAsync(cancellationToken);

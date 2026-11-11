@@ -37,6 +37,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.awaken.sightseeingtravel.BuildConfig
 import coil.compose.AsyncImage
 import com.awaken.sightseeingtravel.R
 import com.awaken.sightseeingtravel.core.model.*
@@ -525,9 +526,9 @@ private fun HomeTabScreen(
 
                 Text(
                     text = if (isEn) {
-                        "Displaying all cultural landmarks and Food & Dining ('Ăn uống') spots within 50km of your current GPS location on OpenFreeMap/Bright."
+                        "Discover cultural landmarks and dining near you."
                     } else {
-                        "Hiển thị toàn bộ địa danh văn hóa và điểm Ăn uống trong bán kính 50km quanh vị trí đang ở của bạn trên bản đồ OpenFreeMap/Bright."
+                        "Khám phá địa danh văn hóa và điểm Ăn uống gần bạn."
                     },
                     color = Color(0xFFE0F2FE),
                     fontSize = 13.sp
@@ -938,16 +939,16 @@ private fun PlacesDirectoryTabScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (isEn) "Places & Dining (Within 50km)" else "Địa Điểm & Ăn Uống (Bán Kính 50km)",
+                            text = if (isEn) "Places & Dining" else "Địa Điểm & Ăn Uống",
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 19.sp,
                             color = Color(0xFF0F172A)
                         )
                         Text(
                             text = if (isEn) {
-                                "${filteredPois.size} places within 50km of (${"%.4f".format(spatialPose.latitude)}, ${"%.4f".format(spatialPose.longitude)})"
+                                "Showing ${filteredPois.size} places near you"
                             } else {
-                                "Hiển thị ${filteredPois.size} điểm trong vùng 50km quanh vị trí đang ở (${"%.4f".format(spatialPose.latitude)}, ${"%.4f".format(spatialPose.longitude)})"
+                                "Hiển thị ${filteredPois.size} điểm gần bạn"
                             },
                             fontSize = 11.5.sp,
                             color = Color(0xFF0284C7),
@@ -971,8 +972,8 @@ private fun PlacesDirectoryTabScreen(
                     onValueChange = { searchQuery = it },
                     placeholder = {
                         Text(
-                            if (isEn) "Search landmarks, Pho, Banh Mi, coffee..."
-                            else "Tìm địa danh, Ăn uống, Phở, Bánh mì, Cà phê..."
+                            if (isEn) "Search food, heritage..."
+                            else "Tìm Ăn Uống, Di sản..."
                         )
                     },
                     leadingIcon = {
@@ -1810,7 +1811,11 @@ private fun InfoAndProfileTabScreen(
                         color = Color(0xFF622821)
                     )
                     Text(
-                        text = if (isEn) "Vintage Heritage Stamp Edition • v1.1" else "Dấu viễn du • Phiên bản v1.1",
+                        text = if (isEn) {
+                            "Vintage Heritage Stamp Edition • v${BuildConfig.VERSION_NAME}"
+                        } else {
+                            "Dấu viễn du • Phiên bản v${BuildConfig.VERSION_NAME}"
+                        },
                         fontSize = 12.5.sp,
                         color = Color(0xFF622821).copy(alpha = 0.8f)
                     )
