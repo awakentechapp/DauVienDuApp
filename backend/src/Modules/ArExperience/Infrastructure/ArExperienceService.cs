@@ -187,13 +187,16 @@ public sealed class ArExperienceService : IArExperienceService
             .Select(card => new ArModelLibraryItemDto(
                 card.Id,
                 card.PoiId,
-                card.Localizations
+                string.IsNullOrWhiteSpace(card.ModelName)
+                    ? card.Localizations
                     .OrderByDescending(x => string.Equals(x.LanguageCode, SupportedLanguages.Vietnamese, StringComparison.OrdinalIgnoreCase))
                     .ThenBy(x => x.LanguageCode)
                     .Select(x => x.Title)
-                    .FirstOrDefault() ?? "Vật thể 3D",
+                    .FirstOrDefault() ?? "Vật thể 3D"
+                    : card.ModelName,
                 _objectStorageService.CreateReadUrl(card.ModelObjectKey!),
-                card.ModelRotationDegrees))
+                card.ModelRotationDegrees,
+                card.ModelCategory.ToString()))
             .ToList();
 
         return Result.Success<IReadOnlyList<ArModelLibraryItemDto>>(items);
@@ -266,6 +269,12 @@ public sealed class ArExperienceService : IArExperienceService
         var modelResult = card.AttachExistingModel(
             sourceCard.ModelObjectKey,
             request.ModelRotationDegrees,
+            sourceCard.ModelName ?? sourceCard.Localizations
+                .OrderByDescending(x => string.Equals(x.LanguageCode, SupportedLanguages.Vietnamese, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(x => x.LanguageCode)
+                .Select(x => x.Title)
+                .FirstOrDefault(),
+            sourceCard.ModelCategory,
             nowUtc);
         if (modelResult.IsFailure)
         {
@@ -449,6 +458,8 @@ public sealed class ArExperienceService : IArExperienceService
             localizations,
             card.ModelStatus,
             card.ModelError,
-            card.ModelRotationDegrees);
+            card.ModelRotationDegrees,
+            card.ModelName,
+            card.ModelCategory.ToString());
     }
 }

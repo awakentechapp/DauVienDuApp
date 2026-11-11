@@ -17,11 +17,21 @@ public struct SightseeingMapScreen: View {
     @State private var nearbyPois: [NearbyPoiDto] = []
     @State private var selectedPoi: NearbyPoiDto?
     @State private var arActivePoi: NearbyPoiDto?
+    @State private var searchText: String = ""
     @State private var searchRadiusKm: Double = 50.0
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
 
     public init() {}
+
+    private var visiblePois: [NearbyPoiDto] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return nearbyPois }
+        return nearbyPois.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+                $0.category.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     public var body: some View {
         NavigationStack {
@@ -30,7 +40,7 @@ public struct SightseeingMapScreen: View {
                 Map(position: $cameraPosition) {
                     UserAnnotation()
 
-                    ForEach(nearbyPois) { poi in
+                    ForEach(visiblePois) { poi in
                         let liveDist = locationManager.distanceInMeters(
                             toLatitude: poi.latitude,
                             longitude: poi.longitude
@@ -59,8 +69,8 @@ public struct SightseeingMapScreen: View {
                             center: CLLocationCoordinate2D(latitude: poi.latitude, longitude: poi.longitude),
                             radius: poi.activationRadiusMeters
                         )
-                        .foregroundStyle(isUnlocked ? Color.green.opacity(0.18) : Color.teal.opacity(0.10))
-                        .stroke(isUnlocked ? Color.green : Color.teal.opacity(0.5), lineWidth: 1.5)
+                        .foregroundStyle(isUnlocked ? BrandPalette.terracotta.opacity(0.16) : BrandPalette.primary.opacity(0.10))
+                        .stroke(isUnlocked ? BrandPalette.terracotta : BrandPalette.primary.opacity(0.5), lineWidth: 1.5)
                     }
                 }
                 .mapControls {
@@ -79,12 +89,14 @@ public struct SightseeingMapScreen: View {
                     if let locError = locationManager.locationError {
                         HStack(spacing: 8) {
                             Image(systemName: "location.slash.fill")
+                                .foregroundStyle(BrandPalette.terracotta)
                             Text(locError)
                                 .font(.caption)
+                                .foregroundStyle(BrandPalette.text)
                             Spacer()
                         }
                         .padding(10)
-                        .background(.ultraThinMaterial)
+                        .background(BrandPalette.paper.opacity(0.95))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         .padding(.horizontal, 14)
                     }
@@ -123,84 +135,81 @@ public struct SightseeingMapScreen: View {
     // MARK: - Top Floating Header
 
     private var topFloatingHeader: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arkit")
-                        .foregroundStyle(.teal)
-                    Text(
-                        appState.selectedLanguage == .vi
-                            ? "Điểm Tham Quan Quanh Bạn"
-                            : "Nearby Sightseeing POIs"
-                    )
-                    .font(.subheadline.weight(.bold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "map.fill")
+                    .font(.headline)
+                    .foregroundStyle(BrandPalette.primary)
+                    .frame(width: 38, height: 38)
+                    .background(BrandPalette.cream)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(appState.selectedLanguage == .vi ? "Khám phá" : "Explore")
+                        .font(.system(size: 22, weight: .bold, design: .serif))
+                        .foregroundStyle(BrandPalette.text)
+                    Text("\(visiblePois.count) \(appState.selectedLanguage == .vi ? "địa điểm" : "places") • \(Int(searchRadiusKm))km")
+                        .font(.caption2)
+                        .foregroundStyle(BrandPalette.mutedText)
                 }
 
-                Text(
-                    String(
-                        format: "GPS: %.4f, %.4f • %d POIs (%.0fkm)",
-                        locationManager.latitude,
-                        locationManager.longitude,
-                        nearbyPois.count,
-                        searchRadiusKm
-                    )
-                )
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                Spacer()
+
+                Button {
+                    let nextLang: AppLanguage = appState.selectedLanguage == .vi ? .en : .vi
+                    Task { await appState.switchLanguage(nextLang) }
+                } label: {
+                    Text(appState.selectedLanguage.rawValue.uppercased())
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(BrandPalette.cream)
+                        .foregroundStyle(BrandPalette.primary)
+                        .clipShape(Capsule())
+                }
+
+                Button { Task { await fetchNearbyPois() } } label: {
+                    if isLoading { ProgressView().tint(BrandPalette.primary).frame(width: 34, height: 34) }
+                    else { Image(systemName: "arrow.clockwise").font(.subheadline.weight(.semibold)).frame(width: 34, height: 34) }
+                }
+                .foregroundStyle(BrandPalette.primary)
+                .background(BrandPalette.surface)
+                .clipShape(Circle())
             }
 
-            Spacer()
-
-            // Quick Language Toggle (VI / EN)
-            Button {
-                let nextLang: AppLanguage = appState.selectedLanguage == .vi ? .en : .vi
-                Task {
-                    await appState.switchLanguage(nextLang)
-                }
-            } label: {
-                Text(appState.selectedLanguage.rawValue.uppercased())
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.teal.opacity(0.18))
-                    .foregroundStyle(.teal)
-                    .clipShape(Capsule())
-            }
-
-            // Refresh Nearby POIs Button
-            Button {
-                Task {
-                    await fetchNearbyPois()
-                }
-            } label: {
-                if isLoading {
-                    ProgressView()
-                        .frame(width: 28, height: 28)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 28, height: 28)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(BrandPalette.primary)
+                TextField(appState.selectedLanguage == .vi ? "Tìm địa điểm, di tích…" : "Search landmarks and places…", text: $searchText)
+                    .font(.subheadline)
+                    .tint(BrandPalette.primary)
+                    .submitLabel(.search)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(BrandPalette.mutedText)
+                    }
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.teal)
-            .clipShape(Circle())
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+            .background(BrandPalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 13))
+            .overlay(RoundedRectangle(cornerRadius: 13).stroke(BrandPalette.border, lineWidth: 1))
         }
-        .padding(12)
-        .background(.ultraThinMaterial)
+        .padding(13)
+        .background(BrandPalette.paper.opacity(0.97))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+        .shadow(color: BrandPalette.primaryDeep.opacity(0.16), radius: 10, y: 4)
     }
 
     // MARK: - Bottom Carousel of Nearby POIs
 
     private var bottomPoiCarousel: some View {
         Group {
-            if nearbyPois.isEmpty && !isLoading {
+            if visiblePois.isEmpty && !isLoading {
                 HStack(spacing: 12) {
                     Image(systemName: "mappin.and.ellipse")
                         .font(.title2)
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(BrandPalette.primary)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(
                             appState.selectedLanguage == .vi
@@ -211,26 +220,27 @@ public struct SightseeingMapScreen: View {
                         if let errorMessage = errorMessage {
                             Text(errorMessage)
                                 .font(.caption2)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(BrandPalette.error)
                                 .lineLimit(2)
                         }
                     }
                     Spacer()
-                    Button(appState.selectedLanguage == .vi ? "Thử lại" : "Retry") {
-                        Task { await fetchNearbyPois() }
+                    Button(appState.selectedLanguage == .vi ? (nearbyPois.isEmpty ? "Thử lại" : "Xóa") : (nearbyPois.isEmpty ? "Retry" : "Clear")) {
+                        if nearbyPois.isEmpty { Task { await fetchNearbyPois() } }
+                        else { searchText = "" }
                     }
                     .font(.caption.weight(.bold))
                     .buttonStyle(.borderedProminent)
-                    .tint(.teal)
+                    .tint(BrandPalette.primary)
                 }
                 .padding(14)
-                .background(.ultraThinMaterial)
+                .background(BrandPalette.paper.opacity(0.96))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .padding(.horizontal, 14)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 14) {
-                        ForEach(nearbyPois) { poi in
+                        ForEach(visiblePois) { poi in
                             let liveDist = locationManager.distanceInMeters(
                                 toLatitude: poi.latitude,
                                 longitude: poi.longitude
@@ -295,23 +305,29 @@ private struct PoiMapPinView: View {
     let isArUnlocked: Bool
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: isArUnlocked ? "arkit" : categoryIconName(poi.category))
-                    .font(.caption.weight(.bold))
+                    .font(.caption2.weight(.bold))
+                Text(poi.name)
+                    .font(.caption2.weight(.bold))
+                    .lineLimit(1)
+                    .frame(maxWidth: 145)
+                Text("•")
+                    .font(.caption2.weight(.bold))
                 Text(formatDistance(liveDistanceMeters))
                     .font(.caption2.weight(.bold))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(isArUnlocked ? Color.green : Color.teal)
-            .foregroundStyle(.white)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(isArUnlocked ? BrandPalette.terracotta : BrandPalette.primary)
+            .foregroundStyle(BrandPalette.cream)
             .clipShape(Capsule())
-            .shadow(color: (isArUnlocked ? Color.green : Color.teal).opacity(0.45), radius: 5, y: 2)
+            .shadow(color: BrandPalette.primaryDeep.opacity(0.3), radius: 5, y: 2)
 
             Image(systemName: "arrowtriangle.down.fill")
                 .font(.caption2)
-                .foregroundStyle(isArUnlocked ? Color.green : Color.teal)
+                .foregroundStyle(isArUnlocked ? BrandPalette.terracotta : BrandPalette.primary)
                 .offset(y: -3)
         }
     }
@@ -319,7 +335,7 @@ private struct PoiMapPinView: View {
     private func categoryIconName(_ category: String) -> String {
         switch category.lowercased() {
         case "historical", "history", "heritage": return "building.columns.fill"
-        case "museum": return "Rosette"
+        case "museum": return "building.columns.fill"
         case "religious", "temple", "pagoda": return "sparkles"
         case "nature", "park": return "leaf.fill"
         default: return "mappin.circle.fill"
@@ -351,23 +367,24 @@ private struct NearbyPoiCarouselCard: View {
                     HStack(spacing: 6) {
                         Text(poi.category.uppercased())
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.teal)
+                            .foregroundStyle(BrandPalette.terracotta)
 
                         Text("•")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandPalette.mutedText)
 
                         Text(liveDistanceMeters < 1000 ? "\(Int(liveDistanceMeters))m" : String(format: "%.1fkm", liveDistanceMeters / 1000.0))
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(isArUnlocked ? .green : .secondary)
+                            .foregroundStyle(isArUnlocked ? BrandPalette.terracotta : BrandPalette.mutedText)
                     }
 
                     Text(poi.name)
                         .font(.headline)
+                        .foregroundStyle(BrandPalette.text)
                         .lineLimit(1)
 
                     Text(poi.shortSummary)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandPalette.mutedText)
                         .lineLimit(2)
                 }
 
@@ -377,13 +394,17 @@ private struct NearbyPoiCarouselCard: View {
                 VStack(spacing: 2) {
                     Image(systemName: isArUnlocked ? "lock.open.fill" : "lock.fill")
                         .font(.caption)
-                    Text(isArUnlocked ? "AR Ready" : "AR Locked")
+                    Text(
+                        isArUnlocked
+                            ? (language == .vi ? "Đã mở AR" : "AR Ready")
+                            : (language == .vi ? "Chưa mở AR" : "AR Locked")
+                    )
                         .font(.system(size: 9, weight: .bold))
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(isArUnlocked ? Color.green.opacity(0.18) : Color.orange.opacity(0.15))
-                .foregroundStyle(isArUnlocked ? .green : .orange)
+                .background(isArUnlocked ? BrandPalette.cream : BrandPalette.sand)
+                .foregroundStyle(BrandPalette.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
 
@@ -396,8 +417,8 @@ private struct NearbyPoiCarouselCard: View {
                     .font(.caption.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .background(Color.teal.opacity(0.15))
-                    .foregroundStyle(.teal)
+                    .background(BrandPalette.cream)
+                    .foregroundStyle(BrandPalette.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
 
@@ -409,8 +430,8 @@ private struct NearbyPoiCarouselCard: View {
                     .font(.caption.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .background(isArUnlocked ? Color.green : Color.gray.opacity(0.35))
-                    .foregroundStyle(.white)
+                    .background(isArUnlocked ? BrandPalette.primary : BrandPalette.mutedText.opacity(0.55))
+                    .foregroundStyle(BrandPalette.cream)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .disabled(!isArUnlocked)
@@ -418,8 +439,8 @@ private struct NearbyPoiCarouselCard: View {
         }
         .padding(14)
         .frame(width: 300)
-        .background(.ultraThinMaterial)
+        .background(BrandPalette.paper.opacity(0.97))
         .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+        .shadow(color: BrandPalette.primaryDeep.opacity(0.16), radius: 8, y: 4)
     }
 }

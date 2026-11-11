@@ -25,6 +25,7 @@ import com.awaken.sightseeingtravel.core.model.AdminPoiDto
 import com.awaken.sightseeingtravel.core.model.ArModelLibraryItemDto
 import com.awaken.sightseeingtravel.core.model.PlaceArModelRequest
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
+import com.awaken.sightseeingtravel.ui.BrandColors
 import com.google.ar.core.Plane
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
@@ -147,14 +148,14 @@ fun ArModelPlacementDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF080D15))
+                .background(BrandColors.PrimaryDeep)
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xE6141E2C))
+                    .background(BrandColors.PrimaryDeep.copy(alpha = 0.9f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -163,7 +164,7 @@ fun ArModelPlacementDialog(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Đặt vật thể 3D", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    Text(poi.titleFor("vi"), color = Color(0xFFB6DDF4), fontSize = 12.sp, maxLines = 1)
+                    Text(poi.titleFor("vi"), color = BrandColors.Cream, fontSize = 12.sp, maxLines = 1)
                 }
                 IconButton(onClick = { if (!isSaving) onDismiss() }, enabled = !isSaving) {
                     Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color.White)
@@ -293,7 +294,7 @@ fun ArModelPlacementDialog(
                 Surface(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xD9101724)
+                    color = BrandColors.PrimaryDeep.copy(alpha = 0.85f)
                 ) {
                     Text(
                         text = when {
@@ -311,7 +312,7 @@ fun ArModelPlacementDialog(
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFFF8FAFC),
+                color = BrandColors.Cream,
                 shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
             ) {
                 Column(
@@ -347,7 +348,10 @@ fun ArModelPlacementDialog(
                                     text = {
                                         Column {
                                             Text(item.name, fontWeight = FontWeight.SemiBold)
-                                            Text("POI ${item.sourcePoiId.take(8)}", style = MaterialTheme.typography.bodySmall)
+                                            Text(
+                                                "${modelCategoryLabel(item.category, false)} • POI ${item.sourcePoiId.take(8)}",
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
                                         }
                                     },
                                     onClick = {

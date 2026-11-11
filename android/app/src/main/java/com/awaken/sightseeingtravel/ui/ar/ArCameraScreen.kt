@@ -1,17 +1,10 @@
 package com.awaken.sightseeingtravel.ui.ar
 
-import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas as AndroidCanvas
-import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
-import android.media.Image
-import android.graphics.ImageFormat
-import android.graphics.YuvImage
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -42,17 +36,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.graphics.drawable.toBitmap
-import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.imageLoader
 import coil.request.ImageRequest
 import com.awaken.sightseeingtravel.core.model.ArInfoCardDto
 import com.awaken.sightseeingtravel.core.model.CommunityPhotoDto
-import com.awaken.sightseeingtravel.core.model.PhotoAnchorSnapshot
 import com.awaken.sightseeingtravel.core.model.PoiArContextDto
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
-import com.google.ar.core.Frame
+import com.awaken.sightseeingtravel.ui.BrandColors
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
 import io.github.sceneview.ar.ARScene
@@ -68,8 +60,6 @@ import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberNodes
 import io.github.sceneview.rememberOnGestureListener
 import io.github.sceneview.math.Size
-import java.io.File
-import java.io.ByteArrayOutputStream
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -81,7 +71,6 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0
 
@@ -95,10 +84,8 @@ fun ArCameraScreen(
     arContext: PoiArContextDto,
     spatialPose: DeviceSpatialPose,
     currentUserId: String?,
-    isUploadingPhoto: Boolean,
-    uploadErrorMessage: String?,
     selectedLanguage: String,
-    onCaptureAndUploadPhoto: (File, String, PhotoAnchorSnapshot, () -> Unit) -> Unit,
+    onOpenSelfieCamera: () -> Unit,
     onToggleLikePhoto: (String) -> Unit,
     onReportPhoto: (String, String) -> Unit,
     onDeleteOwnPhoto: (String) -> Unit,
@@ -110,22 +97,9 @@ fun ArCameraScreen(
     var selectedArCard by remember { mutableStateOf<ArInfoCardDto?>(null) }
     var selectedCommunityPhoto by remember { mutableStateOf<CommunityPhotoDto?>(null) }
     var fullScreenPhoto by remember { mutableStateOf<CommunityPhotoDto?>(null) }
-    var showCaptureDialog by remember { mutableStateOf(false) }
-    var pendingCapturedFile by remember { mutableStateOf<File?>(null) }
-    var pendingCapturedPose by remember { mutableStateOf<PhotoAnchorSnapshot?>(null) }
-    var photoCaptionInput by remember { mutableStateOf("") }
-
-    val discardPendingCapture = {
-        pendingCapturedFile?.delete()
-        pendingCapturedFile = null
-        pendingCapturedPose = null
-        showCaptureDialog = false
-    }
     var showReportDialogForPhotoId by remember { mutableStateOf<String?>(null) }
     var reportReasonInput by remember { mutableStateOf("") }
     var arSessionError by remember { mutableStateOf<String?>(null) }
-    var isCapturingPhoto by remember { mutableStateOf(false) }
-    val captureRequested = remember { AtomicBoolean(false) }
     val engine = rememberEngine()
     val modelLoader = rememberModelLoader(engine)
     val materialLoader = rememberMaterialLoader(engine)
@@ -191,15 +165,11 @@ fun ArCameraScreen(
 
     LaunchedEffect(isWithinPoiZone) {
         if (!isWithinPoiZone) {
-            captureRequested.set(false)
-            isCapturingPhoto = false
             childNodes.toList().forEach { runCatching { it.destroy() } }
             childNodes.clear()
             arTargetsInstalled = false
             selectedArCard = null
             selectedCommunityPhoto = null
-            showCaptureDialog = false
-            discardPendingCapture()
         }
     }
 
@@ -210,7 +180,7 @@ fun ArCameraScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF090D16))
+            .background(BrandColors.PrimaryDeep)
     ) {
         ARScene(
             modifier = Modifier.fillMaxSize(),
@@ -323,25 +293,6 @@ fun ArCameraScreen(
                     }.onFailure { arSessionError = it.localizedMessage ?: "Unable to create AR anchors" }
                 }
 
-                if (captureRequested.compareAndSet(true, false)) {
-                    val capturedFile = runCatching { captureArFrameToCacheFile(context, frame) }.getOrNull()
-                    ContextCompat.getMainExecutor(context).execute {
-                        isCapturingPhoto = false
-                        if (capturedFile != null) {
-                            pendingCapturedFile = capturedFile
-                            pendingCapturedPose = PhotoAnchorSnapshot(
-                                latitude = spatialPose.latitude,
-                                longitude = spatialPose.longitude,
-                                azimuthDegrees = effectiveAzimuth,
-                                pitchDegrees = spatialPose.pitchDegrees.coerceIn(-90f, 90f)
-                            )
-                            photoCaptionInput = ""
-                            showCaptureDialog = true
-                        } else {
-                            arSessionError = if (isEn) "Could not capture the AR camera frame." else "Không thể chụp khung hình từ camera AR."
-                        }
-                    }
-                }
             },
             onGestureListener = rememberOnGestureListener(
                 onSingleTapConfirmed = { _, node ->
@@ -389,7 +340,7 @@ fun ArCameraScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Surface(
-                        color = Color(0xFF0F172A).copy(alpha = 0.82f),
+                        color = BrandColors.PrimaryDeep.copy(alpha = 0.88f),
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -408,7 +359,7 @@ fun ArCameraScreen(
                                 } else {
                                     "${if (isWithinPoiZone) "GPS ${distanceToPoiMeters.roundToInt()}m" else "Chưa có GPS/ngoài vùng"} • Hướng ${effectiveAzimuth.roundToInt()}° • ${arContext.arInfoCards.size} thẻ • ${top10Photos.size} ảnh"
                                 },
-                                color = Color(0xFF38BDF8),
+                                color = BrandColors.Cream,
                                 fontSize = 11.sp
                             )
                         }
@@ -441,7 +392,7 @@ fun ArCameraScreen(
             }
         }
 
-        // 5. Bottom Controls: live GPS / compass guidance + on-site photo capture
+        // 5. Bottom Controls: live GPS / compass guidance + separate selfie capture
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -451,7 +402,7 @@ fun ArCameraScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Surface(
-                color = Color(0xFF0F172A).copy(alpha = 0.84f),
+                color = BrandColors.PrimaryDeep.copy(alpha = 0.9f),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -464,9 +415,9 @@ fun ArCameraScreen(
                             else -> if (isEn) "Turn toward a saved AR location to see its anchored 3D card or photo." else "Xoay camera về vị trí AR đã ghim để thấy thẻ hoặc ảnh neo trong không gian 3D."
                         },
                         color = when {
-                            arSessionError != null -> Color(0xFFFCA5A5)
-                            isWithinPoiZone -> Color(0xFF7DD3FC)
-                            else -> Color(0xFFFACC15)
+                            arSessionError != null -> BrandColors.Error
+                            isWithinPoiZone -> BrandColors.Cream
+                            else -> BrandColors.Terracotta
                         },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
@@ -480,17 +431,15 @@ fun ArCameraScreen(
                     ) {
                         Text(
                             text = if (isEn) "Anchors stay fixed as you turn the camera" else "Các điểm AR đứng yên khi bạn xoay camera",
-                            color = Color(0xFF94A3B8),
+                            color = BrandColors.Cream.copy(alpha = 0.8f),
                             fontSize = 11.sp,
                             modifier = Modifier.weight(1f)
                         )
 
                         Button(
-                            onClick = {
-                                if (captureRequested.compareAndSet(false, true)) isCapturingPhoto = true
-                            },
-                            enabled = !isUploadingPhoto && !isCapturingPhoto && isWithinPoiZone,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            onClick = onOpenSelfieCamera,
+                            enabled = isWithinPoiZone,
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandColors.Terracotta),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Icon(
@@ -500,13 +449,7 @@ fun ArCameraScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isUploadingPhoto) {
-                                    if (isEn) "Uploading..." else "Đang tải lên..."
-                                } else if (isCapturingPhoto) {
-                                    if (isEn) "Capturing..." else "Đang chụp..."
-                                } else {
-                                    if (isEn) "Capture AR Photo" else "Chụp ảnh tại Pin"
-                                },
+                                text = if (isEn) "Take a selfie" else "Chụp selfie tại Pin",
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 13.sp
                             )
@@ -531,12 +474,12 @@ fun ArCameraScreen(
             title = {
                 Column {
                     Surface(
-                        color = Color(0xFF0284C7).copy(alpha = 0.15f),
+                        color = BrandColors.Terracotta.copy(alpha = 0.18f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = "${card.badgeLabel} • ${card.azimuthDegrees.toInt()}°",
-                            color = Color(0xFF0284C7),
+                            color = BrandColors.Cream,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -589,7 +532,7 @@ fun ArCameraScreen(
                                 .clickable { fullScreenPhoto = photo }
                         )
                         Surface(
-                            color = Color(0xFFEAB308),
+                            color = BrandColors.Cream,
                             shape = RoundedCornerShape(bottomEnd = 12.dp),
                             modifier = Modifier.align(Alignment.TopStart)
                         ) {
@@ -642,7 +585,7 @@ fun ArCameraScreen(
                             Icon(
                                 imageVector = if (photo.isLikedByCurrentUser) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                 contentDescription = null,
-                                tint = if (photo.isLikedByCurrentUser) Color(0xFFE11D48) else LocalContentColor.current
+                                tint = if (photo.isLikedByCurrentUser) BrandColors.Terracotta else LocalContentColor.current
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("${photo.likeCount}")
@@ -737,78 +680,6 @@ fun ArCameraScreen(
     }
 
     // ========================================================================
-    // DIALOG 3: UPLOAD CAPTURED PHOTO TO CONTABO OBJECT STORAGE
-    // ========================================================================
-    if (showCaptureDialog && pendingCapturedFile != null) {
-        AlertDialog(
-            onDismissRequest = { if (!isUploadingPhoto) discardPendingCapture() },
-            title = {
-                Text(
-                    text = if (isEn) "Share Photo to 360° POI Space" else "Chia sẻ ảnh lên Không gian AR",
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Column {
-                    AsyncImage(
-                        model = pendingCapturedFile,
-                        contentDescription = if (isEn) "Captured AR photo preview" else "Ảnh AR vừa chụp",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(210.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.Black)
-                    )
-                    if (!uploadErrorMessage.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = uploadErrorMessage,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = photoCaptionInput,
-                        onValueChange = { photoCaptionInput = it },
-                        label = { Text(if (isEn) "Caption / Story at this angle" else "Chú thích / Cảm nhận của bạn") },
-                        singleLine = false,
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val file = pendingCapturedFile ?: return@Button
-                        val pose = pendingCapturedPose ?: return@Button
-                        onCaptureAndUploadPhoto(file, photoCaptionInput, pose) {
-                            discardPendingCapture()
-                        }
-                    },
-                    enabled = !isUploadingPhoto && pendingCapturedPose != null
-                ) {
-                    Text(
-                        when {
-                            isUploadingPhoto && isEn -> "Uploading…"
-                            isUploadingPhoto -> "Đang tải lên…"
-                            isEn -> "Upload Photo"
-                            else -> "Tải ảnh lên"
-                        }
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { discardPendingCapture() }, enabled = !isUploadingPhoto) {
-                    Text(if (isEn) "Cancel" else "Hủy")
-                }
-            }
-        )
-    }
-
-    // ========================================================================
     // DIALOG 4: REPORT INAPPROPRIATE COMMUNITY PHOTO
     // ========================================================================
     showReportDialogForPhotoId?.let { targetPhotoId ->
@@ -861,8 +732,8 @@ private fun SpatialRadarHud(
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(Color(0xCC0F172A))
-            .border(1.dp, Color(0xFF38BDF8), CircleShape)
+            .background(BrandColors.PrimaryDeep.copy(alpha = 0.82f))
+            .border(1.dp, BrandColors.Cream, CircleShape)
     ) {
         val radius = size.minDimension / 2f
         val center = Offset(radius, radius)
@@ -882,7 +753,7 @@ private fun SpatialRadarHud(
             val dotX = center.x + (cos(rad) * radius * distRatio).toFloat()
             val dotY = center.y + (sin(rad) * radius * distRatio).toFloat()
             drawCircle(
-                color = Color(0xFF38BDF8),
+                color = BrandColors.Cream,
                 radius = 3.5.dp.toPx(),
                 center = Offset(dotX, dotY)
             )
@@ -896,7 +767,7 @@ private fun SpatialRadarHud(
             val dotX = center.x + (cos(rad) * radius * 0.72f).toFloat()
             val dotY = center.y + (sin(rad) * radius * 0.72f).toFloat()
             drawCircle(
-                color = Color(0xFFFACC15),
+                color = BrandColors.Terracotta,
                 radius = 3.dp.toPx(),
                 center = Offset(dotX, dotY)
             )
@@ -930,14 +801,14 @@ private fun createSpatialModelLabelBitmap(label: String): Bitmap {
         RectF(8f, 8f, 892f, 160f),
         44f,
         44f,
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.argb(225, 15, 23, 42) }
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BrandColors.PrimaryDeep.copy(alpha = 0.88f).toArgb() }
     )
     canvas.drawRoundRect(
         RectF(10f, 10f, 890f, 158f),
         42f,
         42f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.rgb(56, 189, 248)
+            color = BrandColors.Cream.toArgb()
             style = Paint.Style.STROKE
             strokeWidth = 8f
         }
@@ -958,7 +829,7 @@ private fun createSpatialModelLabelBitmap(label: String): Bitmap {
 private fun createSpatialInfoCardBitmap(card: ArInfoCardDto): Bitmap {
     val bitmap = Bitmap.createBitmap(1000, 620, Bitmap.Config.ARGB_8888)
     val canvas = AndroidCanvas(bitmap)
-    val background = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(15, 23, 42) }
+    val background = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BrandColors.PrimaryDeep.toArgb() }
     canvas.drawRoundRect(RectF(0f, 0f, 1000f, 620f), 48f, 48f, background)
     canvas.drawRoundRect(
         RectF(4f, 4f, 996f, 616f), 44f, 44f,
@@ -966,12 +837,12 @@ private fun createSpatialInfoCardBitmap(card: ArInfoCardDto): Bitmap {
             color = android.graphics.Color.TRANSPARENT
             style = Paint.Style.STROKE
             strokeWidth = 8f
-            setARGB(255, 56, 189, 248)
+            color = BrandColors.Cream.toArgb()
         }
     )
     canvas.drawRoundRect(
         RectF(40f, 34f, 400f, 104f), 20f, 20f,
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(2, 132, 199) }
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BrandColors.Terracotta.toArgb() }
     )
     val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
@@ -988,14 +859,14 @@ private fun createSpatialInfoCardBitmap(card: ArInfoCardDto): Bitmap {
     drawWrappedText(canvas, card.title, 50f, 185f, 900f, headingPaint, 62f, 2)
 
     val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.rgb(226, 232, 240)
+        color = BrandColors.Cream.copy(alpha = 0.92f).toArgb()
         textSize = 34f
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
     }
     drawWrappedText(canvas, card.bodyText, 52f, 330f, 890f, bodyPaint, 48f, 4)
 
     val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.rgb(125, 211, 252)
+        color = BrandColors.Cream.toArgb()
         textSize = 30f
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
@@ -1008,7 +879,7 @@ private fun createSpatialPhotoBitmap(source: Bitmap, caption: String?, rank: Int
     val canvas = AndroidCanvas(bitmap)
     canvas.drawRoundRect(
         RectF(0f, 0f, 900f, 650f), 36f, 36f,
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(24, 24, 27) }
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BrandColors.PrimaryDeep.toArgb() }
     )
     val imageBounds = RectF(24f, 24f, 876f, 510f)
     val scale = min(imageBounds.width() / source.width, imageBounds.height() / source.height)
@@ -1023,19 +894,19 @@ private fun createSpatialPhotoBitmap(source: Bitmap, caption: String?, rank: Int
     canvas.drawBitmap(source, null, destination, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
     canvas.drawRoundRect(
         RectF(30f, 30f, 150f, 108f), 20f, 20f,
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(250, 204, 21) }
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BrandColors.Cream.toArgb() }
     )
     canvas.drawText(
         "#$rank", 52f, 82f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.BLACK
+            color = BrandColors.PrimaryDeep.toArgb()
             textSize = 40f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
     )
     canvas.drawRect(
         RectF(20f, 520f, 880f, 640f),
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(24, 24, 27) }
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BrandColors.PrimaryDeep.toArgb() }
     )
     if (!caption.isNullOrBlank()) {
         val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1137,65 +1008,4 @@ private fun formatCapturedDate(timestamp: String): String {
         ?: runCatching { LocalDateTime.parse(timestamp).toLocalDate() }.getOrNull()
         ?: runCatching { LocalDate.parse(timestamp.take(10)) }.getOrNull()
     return localDate?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ROOT)) ?: timestamp.take(10)
-}
-
-private fun captureArFrameToCacheFile(context: Context, frame: Frame): File {
-    val image = frame.acquireCameraImage()
-    val jpegBytes = try {
-        image.toNv21().let { nv21 ->
-            ByteArrayOutputStream().use { output ->
-                val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-                check(yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 92, output))
-                output.toByteArray()
-            }
-        }
-    } finally {
-        image.close()
-    }
-
-    val decoded = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
-        ?: error("AR camera image could not be decoded")
-    val oriented = if (
-        context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT &&
-        decoded.width > decoded.height
-    ) {
-        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, Matrix().apply { postRotate(90f) }, true)
-            .also { if (it !== decoded) decoded.recycle() }
-    } else decoded
-
-    val file = File(context.cacheDir, "ar_poi_capture_${System.currentTimeMillis()}.jpg")
-    file.outputStream().use { output ->
-        check(oriented.compress(Bitmap.CompressFormat.JPEG, 92, output))
-    }
-    oriented.recycle()
-    return file
-}
-
-private fun Image.toNv21(): ByteArray {
-    val width = this.width
-    val height = this.height
-    val result = ByteArray(width * height * 3 / 2)
-    val yPlane = planes[0]
-    val yBuffer = yPlane.buffer.duplicate()
-    var outputIndex = 0
-    for (row in 0 until height) {
-        val rowStart = row * yPlane.rowStride
-        for (column in 0 until width) {
-            result[outputIndex++] = yBuffer.get(rowStart + column * yPlane.pixelStride)
-        }
-    }
-
-    val uPlane = planes[1]
-    val vPlane = planes[2]
-    val uBuffer = uPlane.buffer.duplicate()
-    val vBuffer = vPlane.buffer.duplicate()
-    for (row in 0 until height / 2) {
-        val uRowStart = row * uPlane.rowStride
-        val vRowStart = row * vPlane.rowStride
-        for (column in 0 until width / 2) {
-            result[outputIndex++] = vBuffer.get(vRowStart + column * vPlane.pixelStride)
-            result[outputIndex++] = uBuffer.get(uRowStart + column * uPlane.pixelStride)
-        }
-    }
-    return result
 }

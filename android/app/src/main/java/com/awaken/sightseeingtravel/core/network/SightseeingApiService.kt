@@ -187,7 +187,9 @@ interface SightseeingApiService {
     @POST("api/v1/admin/ar-cards/{cardId}/3d-model")
     suspend fun submitArCard3dModel(
         @Path("cardId") cardId: String,
-        @Part images: List<MultipartBody.Part>
+        @Part images: List<MultipartBody.Part>,
+        @Part("modelName") modelName: RequestBody,
+        @Part("modelCategory") modelCategory: RequestBody
     ): Response<ArModelBuildSubmissionDto>
 
     @GET("api/v1/admin/ar-cards/{cardId}/3d-model-status")

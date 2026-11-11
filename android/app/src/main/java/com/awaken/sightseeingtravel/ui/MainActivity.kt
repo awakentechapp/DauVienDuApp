@@ -27,12 +27,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,12 +46,15 @@ import com.awaken.sightseeingtravel.core.model.*
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.admin.AdminApprovalAndModerationScreen
+import com.awaken.sightseeingtravel.ui.admin.ArModelLibraryDialog
 import com.awaken.sightseeingtravel.ui.ar.ArCameraScreen
+import com.awaken.sightseeingtravel.ui.ar.ArSelfieCaptureScreen
 import com.awaken.sightseeingtravel.ui.map.OpenFreeMapComposeView
 
 private enum class AppDestination {
     MAIN_TABS,
     AR_CAMERA,
+    AR_SELFIE_CAMERA,
     ADMIN_CONSOLE
 }
 
@@ -85,11 +90,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = Color(0xFF0284C7),
-                    secondary = Color(0xFF0F766E),
-                    tertiary = Color(0xFFD97706)
-                )
+                colorScheme = SightseeingColorScheme
             ) {
                 SightseeingTravelRootApp(viewModel = viewModel)
             }
@@ -116,6 +117,12 @@ private fun formatDistanceLabel(meters: Double): String {
         "%.1fkm".format(meters / 1000.0)
     }
 }
+
+private fun formatPinCount(count: Int, isEnglish: Boolean): String =
+    if (isEnglish) "$count ${if (count == 1) "Pin" else "Pins"}" else "$count Pin"
+
+private fun formatArCardCount(count: Int, isEnglish: Boolean): String =
+    if (isEnglish) "$count ${if (count == 1) "AR Card" else "AR Cards"}" else "$count Thẻ AR"
 
 private fun formatDurationLabel(seconds: Double, isEn: Boolean): String {
     val minutes = (seconds / 60.0).toInt().coerceAtLeast(1)
@@ -146,6 +153,8 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
     var focusedPoiId by remember { mutableStateOf<String?>(null) }
     var mapFocusTrigger by remember { mutableIntStateOf(0) }
     var showAuthModal by remember { mutableStateOf(false) }
+    var pendingCameraChoicePoiId by remember { mutableStateOf<String?>(null) }
+    var selfieReturnDestination by remember { mutableStateOf(AppDestination.MAIN_TABS) }
 
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
     val selectPoiForMap: (PoiPinSummaryDto) -> Unit = { pin ->
@@ -153,6 +162,18 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
         focusedPoiId = pin.id
         mapFocusTrigger++
         viewModel.selectPoiPin(pin.id, spatialPose.latitude, spatialPose.longitude)
+    }
+    val requestCameraChoice: (String) -> Unit = { poiId ->
+        pendingCameraChoicePoiId = poiId
+    }
+    val launchArMode: (String, AppDestination) -> Unit = { poiId, destination ->
+        pendingCameraChoicePoiId = null
+        if (destination == AppDestination.AR_SELFIE_CAMERA) {
+            selfieReturnDestination = AppDestination.MAIN_TABS
+        }
+        viewModel.openArExperienceForPoi(poiId) {
+            currentDestination = destination
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -194,11 +215,10 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                     arContext = arCtx,
                     spatialPose = spatialPose,
                     currentUserId = uiState.currentUser?.id,
-                    isUploadingPhoto = uiState.isUploadingPhoto,
-                    uploadErrorMessage = uiState.errorMessage,
                     selectedLanguage = uiState.selectedLanguage,
-                    onCaptureAndUploadPhoto = { file, caption, anchor, onSuccess ->
-                        viewModel.uploadCapturedPhoto(arCtx.poiId, file, caption, anchor, onSuccess)
+                    onOpenSelfieCamera = {
+                        selfieReturnDestination = AppDestination.AR_CAMERA
+                        currentDestination = AppDestination.AR_SELFIE_CAMERA
                     },
                     onToggleLikePhoto = { photoId ->
                         viewModel.toggleLikePhoto(photoId)
@@ -212,6 +232,25 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                     onCloseAr = {
                         currentDestination = AppDestination.MAIN_TABS
                     }
+                )
+            } else {
+                currentDestination = AppDestination.MAIN_TABS
+            }
+        }
+
+        AppDestination.AR_SELFIE_CAMERA -> {
+            val arCtx = uiState.activeArContext
+            if (arCtx != null) {
+                ArSelfieCaptureScreen(
+                    arContext = arCtx,
+                    spatialPose = spatialPose,
+                    isUploadingPhoto = uiState.isUploadingPhoto,
+                    uploadErrorMessage = uiState.errorMessage,
+                    selectedLanguage = uiState.selectedLanguage,
+                    onCaptureAndUploadPhoto = { file, caption, anchor, onSuccess ->
+                        viewModel.uploadCapturedPhoto(arCtx.poiId, file, caption, anchor, onSuccess)
+                    },
+                    onClose = { currentDestination = selfieReturnDestination }
                 )
             } else {
                 currentDestination = AppDestination.MAIN_TABS
@@ -266,7 +305,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
             Scaffold(
                 bottomBar = {
                     NavigationBar(
-                        containerColor = Color.White,
+                        containerColor = BrandColors.Paper,
                         tonalElevation = 8.dp
                     ) {
                         MainBottomTab.entries.forEach { tab ->
@@ -288,11 +327,11 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                     )
                                 },
                                 colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Color(0xFF0284C7),
-                                    selectedTextColor = Color(0xFF0284C7),
-                                    indicatorColor = Color(0xFFE0F2FE),
-                                    unselectedIconColor = Color(0xFF64748B),
-                                    unselectedTextColor = Color(0xFF64748B)
+                                    selectedIconColor = BrandColors.Primary,
+                                    selectedTextColor = BrandColors.Primary,
+                                    indicatorColor = BrandColors.Cream,
+                                    unselectedIconColor = BrandColors.MutedText,
+                                    unselectedTextColor = BrandColors.MutedText
                                 )
                             )
                         }
@@ -329,12 +368,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                     initialPlacesCategory = categoryFilter
                                     selectedTab = MainBottomTab.PLACES
                                 },
-                                onOpenArForPin = { pin ->
-                                    viewModel.selectPoiPin(pin.id, spatialPose.latitude, spatialPose.longitude)
-                                    viewModel.openArExperienceForPoi(pin.id) {
-                                        currentDestination = AppDestination.AR_CAMERA
-                                    }
-                                }
+                                onOpenArForPin = { pin -> requestCameraChoice(pin.id) }
                             )
                         }
 
@@ -359,11 +393,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                         pin.longitude
                                     )
                                 },
-                                onOpenArForPin = { pin ->
-                                    viewModel.openArExperienceForPoi(pin.id) {
-                                        currentDestination = AppDestination.AR_CAMERA
-                                    }
-                                },
+                                onOpenArForPin = { pin -> requestCameraChoice(pin.id) },
                                 onRefreshPois = {
                                     viewModel.loadNearbyPois(spatialPose.latitude, spatialPose.longitude)
                                 }
@@ -383,11 +413,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                     viewModel.calculateRouteToPin(poiId, title, latitude, longitude)
                                 },
                                 onSelectNavigationMode = viewModel::selectNavigationTravelMode,
-                                onOpenArCamera = { poiId ->
-                                    viewModel.openArExperienceForPoi(poiId) {
-                                        currentDestination = AppDestination.AR_CAMERA
-                                    }
-                                },
+                                onOpenArCamera = requestCameraChoice,
                                 viewModel = viewModel
                             )
                         }
@@ -401,6 +427,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                     viewModel.loadAdminConsoleData()
                                     currentDestination = AppDestination.ADMIN_CONSOLE
                                 },
+                                onLoadArModelLibrary = viewModel::loadAdminArModelLibrary,
                                 onLogout = { viewModel.logout() }
                             )
                         }
@@ -432,6 +459,116 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
             onDismiss = { showAuthModal = false }
         )
     }
+
+    pendingCameraChoicePoiId?.let { poiId ->
+        val cameraPoiLocation = uiState.selectedPoiDetail?.takeIf { it.id == poiId }?.let {
+            Triple(it.latitude, it.longitude, it.activationRadiusMeters)
+        } ?: uiState.nearbyPois.firstOrNull { it.id == poiId }?.let {
+            Triple(it.latitude, it.longitude, it.activationRadiusMeters)
+        }
+        val distanceMeters = cameraPoiLocation?.let {
+            LocationAndOrientationTracker.calculateDistanceMeters(
+                spatialPose.latitude,
+                spatialPose.longitude,
+                it.first,
+                it.second
+            )
+        }
+        val hasAccurateLiveGps = spatialPose.hasFreshGpsFix &&
+            !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f
+        val isCameraAvailableAtPoi = cameraPoiLocation != null && hasAccurateLiveGps &&
+            distanceMeters != null && distanceMeters <= cameraPoiLocation.third + 20.0
+        val cameraAvailabilityMessage = when {
+            cameraPoiLocation == null -> if (isEn) "Could not load this place." else "Không tải được thông tin địa điểm."
+            !spatialPose.hasFreshGpsFix || spatialPose.isSimulatedLocation -> if (isEn) {
+                "Turn on live GPS to use either camera mode. Emulator locations do not unlock AR."
+            } else {
+                "Cần bật GPS thực để dùng camera. Vị trí mô phỏng trên emulator không mở khóa AR."
+            }
+            spatialPose.accuracyMeters > 50f -> if (isEn) {
+                "GPS accuracy is too low (${spatialPose.accuracyMeters.toInt()}m). Wait for a more accurate fix."
+            } else {
+                "GPS chưa đủ chính xác (${spatialPose.accuracyMeters.toInt()}m). Hãy chờ tín hiệu tốt hơn."
+            }
+            distanceMeters != null && distanceMeters > cameraPoiLocation.third + 20.0 -> if (isEn) {
+                "You are ${formatDistanceLabel(distanceMeters)} away. Move within ${(cameraPoiLocation.third + 20).toInt()}m to open the camera."
+            } else {
+                "Bạn đang cách ${formatDistanceLabel(distanceMeters)}. Hãy đến trong ${(cameraPoiLocation.third + 20).toInt()}m để mở camera."
+            }
+            else -> if (isEn) "You are in the AR zone. Choose a camera mode." else "Bạn đã vào vùng AR. Hãy chọn chế độ camera."
+        }
+        ArCameraModeDialog(
+            isEnglish = isEn,
+            canOpenCamera = isCameraAvailableAtPoi,
+            availabilityMessage = cameraAvailabilityMessage,
+            onViewAr = { launchArMode(poiId, AppDestination.AR_CAMERA) },
+            onTakeSelfie = { launchArMode(poiId, AppDestination.AR_SELFIE_CAMERA) },
+            onDismiss = { pendingCameraChoicePoiId = null }
+        )
+    }
+}
+
+@Composable
+private fun ArCameraModeDialog(
+    isEnglish: Boolean,
+    canOpenCamera: Boolean,
+    availabilityMessage: String,
+    onViewAr: () -> Unit,
+    onTakeSelfie: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(if (isEnglish) "Choose camera mode" else "Chọn chế độ camera")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (isEnglish) {
+                        "View the AR cards and 3D objects, or open the front camera to take a selfie at this point."
+                    } else {
+                        "Xem thẻ AR và vật thể 3D, hoặc mở camera trước để chụp selfie tại điểm này."
+                    },
+                    color = BrandColors.MutedText
+                )
+                Surface(
+                    color = if (canOpenCamera) BrandColors.Cream else BrandColors.Cream,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = availabilityMessage,
+                        color = if (canOpenCamera) BrandColors.Primary else BrandColors.Primary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                Button(
+                    onClick = onViewAr,
+                    enabled = canOpenCamera,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.ViewInAr, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (isEnglish) "Open camera to view AR" else "Mở camera để xem AR")
+                }
+                OutlinedButton(
+                    onClick = onTakeSelfie,
+                    enabled = canOpenCamera,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.PhotoCamera, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (isEnglish) "Open camera to take selfie" else "Mở camera để chụp selfie")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(if (isEnglish) "Cancel" else "Đóng")
+            }
+        }
+    )
 }
 
 // ============================================================================
@@ -452,156 +589,206 @@ private fun HomeTabScreen(
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
     val culturalPois = uiState.nearbyPois.filterNot { isFoodCategory(it.category) }
     val foodPois = uiState.nearbyPois.filter { isFoodCategory(it.category) }
+    val featuredPoi = culturalPois.firstOrNull() ?: uiState.nearbyPois.firstOrNull()
+    val featuredDistance = featuredPoi?.let {
+        LocationAndOrientationTracker.calculateDistanceMeters(
+            spatialPose.latitude,
+            spatialPose.longitude,
+            it.latitude,
+            it.longitude
+        )
+    }
+    val featuredUnlocked = featuredPoi != null && featuredDistance != null &&
+        spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation &&
+        spatialPose.accuracyMeters <= 50f && featuredPoi.canUnlockAr(featuredDistance)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(BrandColors.Paper)
             .verticalScroll(rememberScrollState())
     ) {
-        // Hero Header Banner
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color(0xFF0F172A), Color(0xFF0369A1))
-                    )
-                )
+                .background(BrandColors.Paper)
                 .statusBarsPadding()
-                .padding(horizontal = 18.dp, vertical = 20.dp)
+                .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.logo_ngang_kem_dao),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.logo_ngang_do_gach),
                     contentDescription = "Dấu Viễn Du",
-                        modifier = Modifier
-                            .height(38.dp)
-                            .wrapContentWidth(Alignment.Start)
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(
-                            onClick = onToggleLanguage,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Text(
-                                text = if (isEn) "EN" else "VI",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                        }
-
-                        IconButton(
-                            onClick = onOpenAccountModal,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(Color.White.copy(alpha = 0.2f), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Account",
-                                tint = Color.White
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = if (uiState.currentUser != null) {
-                        if (isEn) "Hello, ${uiState.currentUser.displayName}" else "Xin chào, ${uiState.currentUser.displayName}"
-                    } else {
-                        if (isEn) "Discover Cultural & Culinary Stories • 50km Radius" else "Khám Phá Văn Hóa & Ẩm Thực • Bán Kính 50km"
-                    },
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
+                    modifier = Modifier.height(38.dp).wrapContentWidth(Alignment.Start)
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Text(
-                    text = if (isEn) {
-                        "Discover cultural landmarks and dining near you."
-                    } else {
-                        "Khám phá địa danh văn hóa và điểm Ăn uống gần bạn."
-                    },
-                    color = Color(0xFFE0F2FE),
-                    fontSize = 13.sp
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = { onNavigateToExploreMap(null) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isEn) "Explore 50km Map" else "Bản Đồ Khám Phá",
-                            fontWeight = FontWeight.Bold
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(
+                        onClick = onToggleLanguage,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = BrandColors.Cream,
+                            contentColor = BrandColors.Primary
                         )
+                    ) {
+                        Text(if (isEn) "EN" else "VI", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
-                    OutlinedButton(
-                        onClick = { onNavigateToPlacesTab("FOOD") },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    IconButton(
+                        onClick = onOpenAccountModal,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(BrandColors.Sand, CircleShape)
                     ) {
-                        Icon(Icons.Default.Restaurant, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isEn) "Food & Dining" else "Điểm Ăn Uống")
+                        Icon(Icons.Default.Person, contentDescription = if (isEn) "Account" else "Tài khoản", tint = BrandColors.Primary)
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(18.dp))
+            Text(
+                text = if (isEn) "CULTURAL DISCOVERY" else "KHÁM PHÁ GẦN BẠN",
+                color = BrandColors.Terracotta,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp
+            )
+            Text(
+                text = if (isEn) "Vietnam's\nCultural Heritage" else "Di sản\nViệt Nam",
+                color = BrandColors.Primary,
+                fontSize = 34.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Serif
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = if (uiState.currentUser != null) {
+                    if (isEn) "A story is waiting nearby, ${uiState.currentUser.displayName}." else "Một câu chuyện đang chờ bạn khám phá, ${uiState.currentUser.displayName}."
+                } else {
+                    if (isEn) "Places rich in character, stories that stay with you." else "Những điểm đến giàu bản sắc, những câu chuyện còn mãi."
+                },
+                color = BrandColors.MutedText,
+                fontSize = 14.sp,
+                lineHeight = 20.sp
+            )
         }
 
-        // Quick Telemetry & 50km Zone Cards
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            HomeStatCard(
-                title = if (isEn) "Within 50km" else "Trong vùng 50km",
-                value = "${uiState.nearbyPois.size}",
-                subtitle = if (isEn) "Total places" else "Tổng địa điểm",
-                icon = Icons.Default.Place,
-                accentColor = Color(0xFF0284C7),
-                modifier = Modifier.weight(1f)
-            )
-            HomeStatCard(
-                title = if (isEn) "Food & Dining" else "Điểm Ăn uống",
-                value = "${foodPois.size}",
-                subtitle = if (isEn) "Within 50km" else "Ẩm thực 50km",
-                icon = Icons.Default.Restaurant,
-                accentColor = Color(0xFFE11D48),
-                modifier = Modifier.weight(1f)
-            )
-            HomeStatCard(
-                title = if (isEn) "Compass" else "Hướng la bàn",
-                value = "${spatialPose.azimuthDegrees.toInt()}°",
-                subtitle = if (isEn) "Live heading" else "Góc nhìn 360°",
-                icon = Icons.Default.CompassCalibration,
-                accentColor = Color(0xFFD97706),
-                modifier = Modifier.weight(1f)
-            )
+        if (featuredPoi != null) {
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Column {
+                    Box(modifier = Modifier.fillMaxWidth().height(224.dp)) {
+                        AsyncImage(
+                            model = featuredPoi.coverImageUrl,
+                            contentDescription = featuredPoi.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Surface(
+                            color = BrandColors.Primary.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(bottomEnd = 14.dp),
+                            modifier = Modifier.align(Alignment.TopStart)
+                        ) {
+                            Text(
+                                text = if (isEn) "NEAR YOU" else "GẦN BẠN",
+                                color = BrandColors.Cream,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = PoiCategoryLabels.label(featuredPoi.category, if (isEn) "en" else "vi").uppercase(),
+                                color = BrandColors.Terracotta,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (featuredDistance != null) {
+                                Text(formatDistanceLabel(featuredDistance), color = BrandColors.MutedText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = featuredPoi.title,
+                            color = BrandColors.PrimaryDeep,
+                            fontSize = 26.sp,
+                            lineHeight = 30.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Serif
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = featuredPoi.shortSummary,
+                            color = BrandColors.MutedText,
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (featuredUnlocked) {
+                            Text(
+                                text = if (isEn) "AR experience available here" else "Có trải nghiệm AR tại điểm đến",
+                                color = BrandColors.Terracotta,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 10.dp)
+                            )
+                        }
+                        Button(
+                            onClick = { onNavigateToExploreMap(featuredPoi.id) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BrandColors.Primary,
+                                contentColor = BrandColors.Paper
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 14.dp)
+                        ) {
+                            Text(if (isEn) "Explore this story" else "Khám phá câu chuyện", fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(8.dp))
+                            Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+        } else {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = BrandColors.Cream,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.LocationSearching, contentDescription = null, tint = BrandColors.Primary)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (isEn) "Nearby cultural places will appear here." else "Các địa điểm văn hóa quanh bạn sẽ xuất hiện tại đây.",
+                        color = BrandColors.PrimaryDeep,
+                        fontSize = 13.sp
+                    )
+                }
+            }
         }
 
         // Admin / SuperAdmin Quick Governance Banner (if applicable)
         if (uiState.currentUser?.isAdminOrSuperAdmin == true) {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)),
+                colors = CardDefaults.cardColors(containerColor = BrandColors.Cream),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -622,18 +809,18 @@ private fun HomeTabScreen(
                             },
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.sp,
-                            color = Color(0xFF92400E)
+                            color = BrandColors.Primary
                         )
                         Text(
                             text = if (isEn) "Tap to manage map pins, AR cards, and community photos" else "Chạm để quản lý địa điểm (Pin), thẻ AR và duyệt ảnh cộng đồng",
                             fontSize = 12.sp,
-                            color = Color(0xFFB45309)
+                            color = BrandColors.PrimaryDeep
                         )
                     }
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
                         contentDescription = null,
-                        tint = Color(0xFF92400E),
+                        tint = BrandColors.Primary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -653,7 +840,7 @@ private fun HomeTabScreen(
                 text = if (isEn) "Food & Dining Within 50km (Ăn uống)" else "Địa Điểm Ăn Uống Quanh Bạn (≤ 50km)",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 17.sp,
-                color = Color(0xFF0F172A)
+                color = BrandColors.Text
             )
             TextButton(onClick = { onNavigateToPlacesTab("FOOD") }) {
                 Text(if (isEn) "See All" else "Xem tất cả")
@@ -689,7 +876,7 @@ private fun HomeTabScreen(
                 text = if (isEn) "Cultural Heritage Within 50km" else "Địa Danh Văn Hóa & Lịch Sử (≤ 50km)",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 17.sp,
-                color = Color(0xFF0F172A)
+                color = BrandColors.Text
             )
             TextButton(onClick = { onNavigateToPlacesTab("ALL") }) {
                 Text(if (isEn) "See All" else "Xem tất cả")
@@ -735,7 +922,7 @@ private fun PoiFeaturedHorizontalCard(
 
     Card(
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         modifier = Modifier.width(285.dp)
     ) {
@@ -752,7 +939,7 @@ private fun PoiFeaturedHorizontalCard(
                     modifier = Modifier.fillMaxSize()
                 )
                 Surface(
-                    color = if (isUnlocked) Color(0xFF16A34A) else if (isFood) Color(0xFFE11D48) else Color(0xFF0F172A).copy(alpha = 0.82f),
+                    color = if (isUnlocked) BrandColors.Terracotta else if (isFood) BrandColors.Terracotta else BrandColors.PrimaryDeep.copy(alpha = 0.82f),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -775,7 +962,7 @@ private fun PoiFeaturedHorizontalCard(
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
                     text = PoiCategoryLabels.label(pin.category, if (isEn) "en" else "vi").uppercase(),
-                    color = if (isFood) Color(0xFFE11D48) else Color(0xFF0284C7),
+                    color = if (isFood) BrandColors.Terracotta else BrandColors.Primary,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -786,13 +973,13 @@ private fun PoiFeaturedHorizontalCard(
                     fontSize = 15.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = Color(0xFF0F172A)
+                    color = BrandColors.PrimaryDeep
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = pin.shortSummary,
                     fontSize = 12.5.sp,
-                    color = Color(0xFF475569),
+                    color = BrandColors.MutedText,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -809,7 +996,7 @@ private fun PoiFeaturedHorizontalCard(
                     }
                     Button(
                         onClick = onOpenAr,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandColors.Terracotta),
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                     ) {
@@ -834,7 +1021,7 @@ private fun HomeStatCard(
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = modifier
     ) {
@@ -850,20 +1037,20 @@ private fun HomeStatCard(
                 text = value,
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 19.sp,
-                color = Color(0xFF0F172A)
+                color = BrandColors.PrimaryDeep
             )
             Text(
                 text = title,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.5.sp,
-                color = Color(0xFF334155),
+                color = BrandColors.PrimaryDeep,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 fontSize = 10.sp,
-                color = Color(0xFF64748B),
+                color = BrandColors.MutedText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -925,7 +1112,7 @@ private fun PlacesDirectoryTabScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(BrandColors.Paper)
             .statusBarsPadding()
     ) {
         // Header & Search Bar
@@ -945,7 +1132,7 @@ private fun PlacesDirectoryTabScreen(
                             text = if (isEn) "Places & Dining" else "Địa Điểm & Ăn Uống",
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 19.sp,
-                            color = Color(0xFF0F172A)
+                            color = BrandColors.PrimaryDeep
                         )
                         Text(
                             text = if (isEn) {
@@ -954,7 +1141,7 @@ private fun PlacesDirectoryTabScreen(
                                 "Hiển thị ${filteredPois.size} điểm gần bạn"
                             },
                             fontSize = 11.5.sp,
-                            color = Color(0xFF0284C7),
+                            color = BrandColors.Primary,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -963,7 +1150,7 @@ private fun PlacesDirectoryTabScreen(
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh",
-                            tint = Color(0xFF0284C7)
+                            tint = BrandColors.Primary
                         )
                     }
                 }
@@ -1032,7 +1219,7 @@ private fun PlacesDirectoryTabScreen(
 
                 Card(
                     shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1049,7 +1236,7 @@ private fun PlacesDirectoryTabScreen(
                                 modifier = Modifier.fillMaxSize()
                             )
                             Surface(
-                                color = if (isFood) Color(0xFFE11D48) else Color(0xFF0F172A).copy(alpha = 0.82f),
+                                color = if (isFood) BrandColors.Terracotta else BrandColors.PrimaryDeep.copy(alpha = 0.82f),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
@@ -1076,7 +1263,7 @@ private fun PlacesDirectoryTabScreen(
                             }
 
                             Surface(
-                                color = if (unlocked) Color(0xFF16A34A) else Color(0xFFD97706),
+                                color = if (unlocked) BrandColors.Terracotta else BrandColors.Terracotta,
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
@@ -1101,13 +1288,13 @@ private fun PlacesDirectoryTabScreen(
                                 text = pin.title,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 18.sp,
-                                color = Color(0xFF0F172A)
+                                color = BrandColors.PrimaryDeep
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = pin.shortSummary,
                                 fontSize = 13.5.sp,
-                                color = Color(0xFF475569)
+                                color = BrandColors.MutedText
                             )
                             Spacer(modifier = Modifier.height(10.dp))
 
@@ -1116,21 +1303,21 @@ private fun PlacesDirectoryTabScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "AR Cards: ${pin.arInfoCardCount}",
+                                    text = formatArCardCount(pin.arInfoCardCount, isEn),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF0284C7)
+                                    color = BrandColors.Primary
                                 )
                                 Text(
                                     text = if (isEn) "Photos: ${pin.communityPhotoCount}" else "Ảnh cộng đồng: ${pin.communityPhotoCount}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF0F766E)
+                                    color = BrandColors.Terracotta
                                 )
                                 Text(
                                     text = if (isEn) "Radius: ${pin.activationRadiusMeters.toInt()}m" else "Bán kính AR: ${pin.activationRadiusMeters.toInt()}m",
                                     fontSize = 12.sp,
-                                    color = Color(0xFF64748B)
+                                    color = BrandColors.MutedText
                                 )
                             }
 
@@ -1162,7 +1349,7 @@ private fun PlacesDirectoryTabScreen(
                                 if (unlocked) {
                                     Button(
                                         onClick = { onOpenArForPin(pin) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                                        colors = ButtonDefaults.buttonColors(containerColor = BrandColors.Terracotta),
                                         modifier = Modifier.weight(1f),
                                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                                     ) {
@@ -1199,12 +1386,35 @@ private fun ExploreMapTabContent(
     viewModel: SightseeingAppViewModel
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
+    var searchQuery by remember { mutableStateOf("") }
+    var hasAutoSelectedNearbyPoi by remember { mutableStateOf(false) }
+    val visiblePois = uiState.nearbyPois.filter { poi ->
+        searchQuery.isBlank() || poi.title.contains(searchQuery, ignoreCase = true) ||
+            PoiCategoryLabels.label(poi.category, uiState.selectedLanguage).contains(searchQuery, ignoreCase = true)
+    }
+
+    LaunchedEffect(uiState.nearbyPois.firstOrNull()?.id) {
+        if (!hasAutoSelectedNearbyPoi && uiState.selectedPoiDetail == null) {
+            val firstNearbyPoi = uiState.nearbyPois.minByOrNull { poi ->
+                LocationAndOrientationTracker.calculateDistanceMeters(
+                    spatialPose.latitude,
+                    spatialPose.longitude,
+                    poi.latitude,
+                    poi.longitude
+                )
+            }
+            if (firstNearbyPoi != null) {
+                hasAutoSelectedNearbyPoi = true
+                onSelectPoi(firstNearbyPoi)
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // 1. MapLibre + OpenFreeMap/Bright Vector Tile Map View
         OpenFreeMapComposeView(
             spatialPose = spatialPose,
-            pois = uiState.nearbyPois,
+            pois = visiblePois,
             selectedPoiId = focusedPoiId ?: uiState.selectedPoiDetail?.id,
             recenterTrigger = recenterTrigger,
             focusedPoiId = focusedPoiId,
@@ -1221,7 +1431,7 @@ private fun ExploreMapTabContent(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Top Floating Bar (Language, Role & Auth)
+        // 2. Map-first search and language controls.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1229,51 +1439,61 @@ private fun ExploreMapTabContent(
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = Color.White.copy(alpha = 0.95f),
-                shadowElevation = 6.dp,
+                shape = RoundedCornerShape(22.dp),
+                color = BrandColors.Paper.copy(alpha = 0.97f),
+                shadowElevation = 8.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (uiState.currentUser != null) {
-                                "${uiState.currentUser.displayName} • ${uiState.nearbyPois.size} Pins"
-                            } else {
-                                if (isEn) "Tap any Cultural or Food Pin within 50km" else "Chạm vào Pin Văn hóa hoặc Ăn uống trong 50km"
-                            },
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF475569)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(R.drawable.tem_do_gach),
+                            contentDescription = "Dấu Viễn Du",
+                            modifier = Modifier.size(34.dp)
                         )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        // Language Switcher (VI / EN)
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.setLanguage(if (isEn) "vi" else "en")
-                            },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Dấu Viễn Du", color = BrandColors.Primary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                text = if (isEn) "EN" else "VI",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                if (isEn) "${visiblePois.size} nearby places" else "${visiblePois.size} địa điểm quanh bạn",
+                                color = BrandColors.MutedText,
+                                fontSize = 11.sp
                             )
                         }
-
+                        TextButton(
+                            onClick = { viewModel.setLanguage(if (isEn) "vi" else "en") },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text(if (isEn) "EN" else "VI", color = BrandColors.Primary, fontWeight = FontWeight.Bold)
+                        }
                     }
+
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text(if (isEn) "Search places in this area" else "Tìm địa điểm trong khu vực") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = BrandColors.Primary) },
+                        trailingIcon = if (searchQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = if (isEn) "Clear search" else "Xóa tìm kiếm")
+                                }
+                            }
+                        } else null,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = BrandColors.Primary,
+                            unfocusedBorderColor = BrandColors.Border,
+                            focusedContainerColor = BrandColors.Surface,
+                            unfocusedContainerColor = BrandColors.Surface,
+                            cursorColor = BrandColors.Primary
+                        )
+                    )
                 }
             }
 
@@ -1282,7 +1502,7 @@ private fun ExploreMapTabContent(
             if (!bannerText.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
-                    color = if (uiState.errorMessage != null) Color(0xFFFEE2E2) else Color(0xFFDCFCE7),
+                    color = if (uiState.errorMessage != null) BrandColors.Error.copy(alpha = 0.12f) else BrandColors.Cream,
                     shape = RoundedCornerShape(12.dp),
                     shadowElevation = 4.dp,
                     modifier = Modifier
@@ -1296,7 +1516,7 @@ private fun ExploreMapTabContent(
                     ) {
                         Text(
                             text = bannerText,
-                            color = if (uiState.errorMessage != null) Color(0xFF991B1B) else Color(0xFF14532D),
+                            color = if (uiState.errorMessage != null) BrandColors.Error else BrandColors.Primary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.weight(1f)
@@ -1310,57 +1530,6 @@ private fun ExploreMapTabContent(
                 }
             }
 
-            // Horizontal Quick-Select Carousel of Nearby Published POI Pins within 50km
-            Spacer(modifier = Modifier.height(8.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(uiState.nearbyPois, key = { it.id }) { pin ->
-                    val liveDist = LocationAndOrientationTracker.calculateDistanceMeters(
-                        spatialPose.latitude,
-                        spatialPose.longitude,
-                        pin.latitude,
-                        pin.longitude
-                    )
-                    val unlocked = spatialPose.hasFreshGpsFix &&
-                        !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f &&
-                        pin.canUnlockAr(liveDist)
-                    val isFood = isFoodCategory(pin.category)
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = when {
-                            unlocked -> Color(0xFF16A34A)
-                            isFood -> Color(0xFFE11D48)
-                            else -> Color(0xFF0F172A).copy(alpha = 0.88f)
-                        },
-                        shadowElevation = 3.dp,
-                        modifier = Modifier.clickable {
-                            onSelectPoi(pin)
-                        }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                        ) {
-                            Icon(
-                                imageVector = when {
-                                    unlocked -> Icons.Default.ViewInAr
-                                    isFood -> Icons.Default.Restaurant
-                                    else -> Icons.Default.Place
-                                },
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "${pin.title} (${formatDistanceLabel(liveDist)})",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-            }
         }
 
         // 3. Recenter GPS FAB
@@ -1370,7 +1539,7 @@ private fun ExploreMapTabContent(
                 viewModel.loadNearbyPois(spatialPose.latitude, spatialPose.longitude)
             },
             containerColor = Color.White,
-            contentColor = Color(0xFF0284C7),
+            contentColor = BrandColors.Primary,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(
@@ -1403,7 +1572,7 @@ private fun ExploreMapTabContent(
                         Icon(
                             imageVector = Icons.Default.Directions,
                             contentDescription = null,
-                            tint = Color(0xFF2563EB),
+                            tint = BrandColors.Terracotta,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1411,13 +1580,13 @@ private fun ExploreMapTabContent(
                             Text(
                                 text = if (isEn) "Route to pin" else "Dẫn đường đến pin",
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = BrandColors.MutedText,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = target.title,
                                 fontSize = 16.sp,
-                                color = Color(0xFF0F172A),
+                                color = BrandColors.PrimaryDeep,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1444,19 +1613,19 @@ private fun ExploreMapTabContent(
                         uiState.isCalculatingRoute -> {
                             LinearProgressIndicator(
                                 modifier = Modifier.fillMaxWidth(),
-                                color = Color(0xFF2563EB)
+                                color = BrandColors.Terracotta
                             )
                             Text(
                                 text = if (isEn) "Calculating the route…" else "Đang tính tuyến đường…",
                                 fontSize = 12.sp,
-                                color = Color(0xFF475569)
+                                color = BrandColors.MutedText
                             )
                         }
                         uiState.navigationError != null -> {
                             Text(
                                 text = uiState.navigationError,
                                 fontSize = 12.sp,
-                                color = Color(0xFFB91C1C)
+                                color = BrandColors.Error
                             )
                         }
                         uiState.activeNavigationRoute != null -> {
@@ -1469,24 +1638,24 @@ private fun ExploreMapTabContent(
                                     Text(
                                         if (isEn) "DISTANCE" else "QUÃNG ĐƯỜNG",
                                         fontSize = 10.sp,
-                                        color = Color(0xFF64748B)
+                                        color = BrandColors.MutedText
                                     )
                                     Text(
                                         formatDistanceLabel(route.distanceMeters),
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0F172A)
+                                        color = BrandColors.PrimaryDeep
                                     )
                                 }
                                 Column {
                                     Text(
                                         if (isEn) "EST. TIME" else "THỜI GIAN ƯỚC TÍNH",
                                         fontSize = 10.sp,
-                                        color = Color(0xFF64748B)
+                                        color = BrandColors.MutedText
                                     )
                                     Text(
                                         formatDurationLabel(route.durationSeconds, isEn),
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0F172A)
+                                        color = BrandColors.PrimaryDeep
                                     )
                                 }
                             }
@@ -1494,7 +1663,7 @@ private fun ExploreMapTabContent(
                         else -> Text(
                             text = if (isEn) "Preparing route…" else "Đang chuẩn bị tuyến…",
                             fontSize = 12.sp,
-                            color = Color(0xFF475569)
+                            color = BrandColors.MutedText
                         )
                     }
 
@@ -1571,7 +1740,7 @@ private fun NavigationTravelModeSelector(
             val isSelected = selectedMode == mode
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = if (isSelected) Color(0xFFDBEAFE) else Color(0xFFF1F5F9),
+                color = if (isSelected) BrandColors.Cream else BrandColors.Sand,
                 modifier = Modifier
                     .weight(1f)
                     .clickable { onSelect(mode) }
@@ -1584,7 +1753,7 @@ private fun NavigationTravelModeSelector(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF475569),
+                        tint = if (isSelected) BrandColors.Primary else BrandColors.MutedText,
                         modifier = Modifier.size(17.dp)
                     )
                     Spacer(modifier = Modifier.width(5.dp))
@@ -1592,7 +1761,7 @@ private fun NavigationTravelModeSelector(
                         text = label,
                         fontSize = 11.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF475569),
+                        color = if (isSelected) BrandColors.Primary else BrandColors.MutedText,
                         maxLines = 1
                     )
                 }
@@ -1611,15 +1780,17 @@ private fun InfoAndProfileTabScreen(
     onSetLanguage: (String) -> Unit,
     onOpenAccountModal: () -> Unit,
     onOpenAdminConsole: () -> Unit,
+    onLoadArModelLibrary: suspend () -> List<ArModelLibraryItemDto>,
     onLogout: () -> Unit
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
     val user = uiState.currentUser
+    var showArModelLibrary by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(BrandColors.Paper)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
@@ -1629,13 +1800,13 @@ private fun InfoAndProfileTabScreen(
             text = if (isEn) "Information & Account" else "Thông Tin & Tài Khoản",
             fontWeight = FontWeight.ExtraBold,
             fontSize = 22.sp,
-            color = Color(0xFF0F172A)
+            color = BrandColors.PrimaryDeep
         )
 
         // 1. User Profile & Role Card
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1648,7 +1819,7 @@ private fun InfoAndProfileTabScreen(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .size(54.dp)
-                            .background(Color(0xFFF7EDD7), RoundedCornerShape(12.dp))
+                            .background(BrandColors.Sand, RoundedCornerShape(12.dp))
                     ) {
                         Image(
                             painter = painterResource(id = R.drawable.tem_do_gach),
@@ -1662,21 +1833,21 @@ private fun InfoAndProfileTabScreen(
                             text = user?.displayName ?: (if (isEn) "Guest" else "Khách du lịch"),
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 18.sp,
-                            color = Color(0xFF0F172A)
+                            color = BrandColors.PrimaryDeep
                         )
                         Text(
                             text = "ID: ${user?.email ?: "-"}",
                             fontSize = 13.sp,
-                            color = Color(0xFF64748B)
+                            color = BrandColors.MutedText
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Surface(
-                            color = Color(0xFFDCFCE7),
+                            color = BrandColors.Cream,
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
                                 text = "Role: ${user?.role ?: "Tourist"}",
-                                color = Color(0xFF15803D),
+                                color = BrandColors.Terracotta,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -1690,7 +1861,7 @@ private fun InfoAndProfileTabScreen(
                 Text(
                     text = if (isEn) "Sign in with the email and password registered on this server." else "Đăng nhập bằng email và mật khẩu đã đăng ký trên máy chủ.",
                     fontSize = 12.5.sp,
-                    color = Color(0xFF64748B)
+                    color = BrandColors.MutedText
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -1708,7 +1879,7 @@ private fun InfoAndProfileTabScreen(
                     if (user != null) {
                         OutlinedButton(
                             onClick = onLogout,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626))
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = BrandColors.Error)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -1723,7 +1894,7 @@ private fun InfoAndProfileTabScreen(
         if (user?.isAdminOrSuperAdmin == true) {
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)),
+                colors = CardDefaults.cardColors(containerColor = BrandColors.Cream),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -1735,7 +1906,7 @@ private fun InfoAndProfileTabScreen(
                         },
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp,
-                        color = Color(0xFF92400E)
+                        color = BrandColors.Primary
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -1745,16 +1916,62 @@ private fun InfoAndProfileTabScreen(
                             "Tạo và quản lý địa điểm Văn hóa & Ăn uống (Pin), cấu hình thẻ AR 360°, phê duyệt địa điểm và kiểm duyệt ảnh người dùng."
                         },
                         fontSize = 12.5.sp,
-                        color = Color(0xFFB45309)
+                        color = BrandColors.Terracotta
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Button(
                         onClick = onOpenAdminConsole,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandColors.Terracotta)
                     ) {
                         Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(if (isEn) "Open Governance Console" else "Mở Bảng Quản Trị & Kiểm Duyệt")
+                    }
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = if (isEn) "AR 3D Objects" else "Vật Thể AR 3D",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp,
+                        color = BrandColors.PrimaryDeep
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isEn) {
+                            "Open the admin console, choose a POI and AR card, then capture the object and set its category."
+                        } else {
+                            "Mở quản trị, chọn POI và thẻ AR để chụp vật thể; tên và phân loại sẽ được lưu vào kho."
+                        },
+                        fontSize = 12.5.sp,
+                        color = BrandColors.MutedText
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onOpenAdminConsole,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandColors.Terracotta)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(if (isEn) "Create 3D" else "Tạo vật thể 3D", maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = { showArModelLibrary = true },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(if (isEn) "3D Library" else "Kho vật thể 3D", maxLines = 1)
+                        }
                     }
                 }
             }
@@ -1763,7 +1980,7 @@ private fun InfoAndProfileTabScreen(
         // 3. Language Preferences Card
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1772,7 +1989,7 @@ private fun InfoAndProfileTabScreen(
                     text = if (isEn) "Cultural Guide Language" else "Ngôn Ngữ Thuyết Minh Văn Hóa",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
-                    color = Color(0xFF0F172A)
+                    color = BrandColors.PrimaryDeep
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1793,7 +2010,7 @@ private fun InfoAndProfileTabScreen(
         // 4. Official App Brand Card
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF7EDD7)),
+            colors = CardDefaults.cardColors(containerColor = BrandColors.Sand),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -1826,6 +2043,14 @@ private fun InfoAndProfileTabScreen(
             }
         }
     }
+
+    if (showArModelLibrary && user?.isAdminOrSuperAdmin == true) {
+        ArModelLibraryDialog(
+            isEnglish = isEn,
+            onLoadLibrary = onLoadArModelLibrary,
+            onDismiss = { showArModelLibrary = false }
+        )
+    }
 }
 
 /**
@@ -1852,7 +2077,7 @@ private fun PoiCulturalStoryCard(
 
     Surface(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        color = Color.White,
+        color = BrandColors.Surface,
         shadowElevation = 16.dp,
         modifier = modifier
             .fillMaxWidth()
@@ -1872,12 +2097,12 @@ private fun PoiCulturalStoryCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            color = if (isFood) Color(0xFFFFE4E6) else Color(0xFFE0F2FE),
+                            color = if (isFood) BrandColors.Sand else BrandColors.Cream,
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
                                 text = PoiCategoryLabels.label(detail.category, selectedLanguage),
-                                color = if (isFood) Color(0xFFE11D48) else Color(0xFF0369A1),
+                                color = if (isFood) BrandColors.Terracotta else BrandColors.Primary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -1887,7 +2112,7 @@ private fun PoiCulturalStoryCard(
                         Text(
                             text = "${formatDistanceLabel(liveDistanceMeters)} (AR <= ${(detail.activationRadiusMeters + 20).toInt()}m)",
                             fontSize = 11.5.sp,
-                            color = if (isArUnlocked) Color(0xFF15803D) else Color(0xFFB45309),
+                            color = if (isArUnlocked) BrandColors.Terracotta else BrandColors.MutedText,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -1896,7 +2121,7 @@ private fun PoiCulturalStoryCard(
                         text = detail.title,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 19.sp,
-                        color = Color(0xFF0F172A)
+                        color = BrandColors.Text
                     )
                 }
 
@@ -1915,7 +2140,7 @@ private fun PoiCulturalStoryCard(
                 Button(
                     onClick = onOpenArCamera,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isArUnlocked) Color(0xFF16A34A) else Color(0xFF0284C7)
+                        containerColor = if (isArUnlocked) BrandColors.Terracotta else BrandColors.Primary
                     ),
                     modifier = Modifier.weight(1f)
                 ) {
@@ -1952,7 +2177,7 @@ private fun PoiCulturalStoryCard(
                 text = detail.shortSummary,
                 fontWeight = FontWeight.Medium,
                 fontSize = 14.sp,
-                color = Color(0xFF1E293B)
+                color = BrandColors.Text
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -1960,7 +2185,7 @@ private fun PoiCulturalStoryCard(
             Text(
                 text = detail.culturalStoryMarkdown,
                 fontSize = 13.sp,
-                color = Color(0xFF475569)
+                color = BrandColors.MutedText
             )
 
             if (detail.architecturalHighlights.isNotEmpty()) {
@@ -1968,13 +2193,13 @@ private fun PoiCulturalStoryCard(
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(detail.architecturalHighlights) { highlight ->
                         Surface(
-                            color = Color(0xFFF1F5F9),
+                            color = BrandColors.Sand,
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Text(
                                 text = "• $highlight",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF334155),
+                                color = BrandColors.PrimaryDeep,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                             )
                         }
@@ -2018,69 +2243,124 @@ private fun PoiCulturalStoryCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(communityPhotos, key = { it.id }) { photo ->
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.width(180.dp)
+            when {
+                communityPhotos.isEmpty() -> Text(
+                    text = if (isEn) "No community photos shared here yet." else "Chưa có ảnh cộng đồng được chia sẻ tại đây.",
+                    color = BrandColors.MutedText,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+                communityPhotos.size == 1 -> CommunityPhotoTile(
+                    photo = communityPhotos.first(),
+                    isEnglish = isEn,
+                    onToggleLikePhoto = onToggleLikePhoto,
+                    modifier = Modifier.fillMaxWidth().height(198.dp)
+                )
+                else -> Row(
+                    modifier = Modifier.fillMaxWidth().height(220.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    CommunityPhotoTile(
+                        photo = communityPhotos[0],
+                        isEnglish = isEn,
+                        onToggleLikePhoto = onToggleLikePhoto,
+                        modifier = Modifier.weight(1.15f).fillMaxHeight()
+                    )
+                    Column(
+                        modifier = Modifier.weight(0.85f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(9.dp)
                     ) {
-                        Column {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(110.dp)
-                            ) {
-                                AsyncImage(
-                                    model = photo.imageUrl,
-                                    contentDescription = photo.caption,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.6f),
-                                    shape = RoundedCornerShape(bottomStart = 10.dp),
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .clickable { onToggleLikePhoto(photo.id) }
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (photo.isLikedByCurrentUser) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                            contentDescription = "Like",
-                                            tint = if (photo.isLikedByCurrentUser) Color(0xFFF43F5E) else Color.White,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "${photo.likeCount}",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text(
-                                    text = photo.caption ?: photo.authorDisplayName,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "by ${photo.authorDisplayName}",
-                                    fontSize = 10.5.sp,
-                                    color = Color(0xFF64748B)
-                                )
-                            }
+                        communityPhotos.drop(1).take(2).forEach { photo ->
+                            CommunityPhotoTile(
+                                photo = photo,
+                                isEnglish = isEn,
+                                onToggleLikePhoto = onToggleLikePhoto,
+                                modifier = Modifier.weight(1f).fillMaxWidth()
+                            )
                         }
                     }
                 }
             }
+
+            if (communityPhotos.size > 3) {
+                Spacer(modifier = Modifier.height(10.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    items(communityPhotos.drop(3), key = { it.id }) { photo ->
+                        CommunityPhotoTile(
+                            photo = photo,
+                            isEnglish = isEn,
+                            onToggleLikePhoto = onToggleLikePhoto,
+                            modifier = Modifier.width(178.dp).height(132.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommunityPhotoTile(
+    photo: CommunityPhotoDto,
+    isEnglish: Boolean,
+    onToggleLikePhoto: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier.clip(RoundedCornerShape(16.dp))) {
+        AsyncImage(
+            model = photo.imageUrl,
+            contentDescription = photo.caption ?: photo.authorDisplayName,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(76.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, BrandColors.PrimaryDeep.copy(alpha = 0.9f))
+                    )
+                )
+        )
+        Surface(
+            color = BrandColors.PrimaryDeep.copy(alpha = 0.9f),
+            shape = RoundedCornerShape(50),
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clickable { onToggleLikePhoto(photo.id) }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (photo.isLikedByCurrentUser) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = if (isEnglish) "Like photo" else "Thích ảnh",
+                    tint = BrandColors.Cream,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("${photo.likeCount}", color = BrandColors.Paper, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Column(
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp)
+        ) {
+            Text(
+                text = photo.caption?.takeIf { it.isNotBlank() } ?: photo.authorDisplayName,
+                color = BrandColors.Paper,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = if (isEnglish) "by ${photo.authorDisplayName}" else "Ảnh của ${photo.authorDisplayName}",
+                color = BrandColors.Cream,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -2142,13 +2422,13 @@ private fun AuthAndRoleDialog(
 
                 if (!errorMessage.isNullOrBlank()) {
                     Surface(
-                        color = Color(0xFFFEE2E2),
+                        color = BrandColors.Error.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = errorMessage,
-                            color = Color(0xFF991B1B),
+                            color = BrandColors.Error,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(8.dp)
                         )

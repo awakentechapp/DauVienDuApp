@@ -53,6 +53,14 @@ public sealed class ArExperienceDbContext : DbContext
             builder.Property(x => x.ModelObjectKey)
                 .HasMaxLength(512);
 
+            builder.Property(x => x.ModelName)
+                .HasMaxLength(200);
+
+            builder.Property(x => x.ModelCategory)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .IsRequired();
+
             builder.Property(x => x.ModelStatus)
                 .HasMaxLength(20)
                 .IsRequired();

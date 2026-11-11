@@ -23,6 +23,7 @@
     <EmbeddedResource Include="Migrations/0002_PoiCategoryPhotoPoseAndArCascade.sql" />
     <EmbeddedResource Include="Migrations/0003_ArCard3dModel.sql" />
     <EmbeddedResource Include="Migrations/0004_ArCardModelPlacement.sql" />
+    <EmbeddedResource Include="Migrations/0005_ArModelCatalogMetadata.sql" />
   </ItemGroup>
 
   <ItemGroup>

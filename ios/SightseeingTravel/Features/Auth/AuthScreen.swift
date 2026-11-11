@@ -20,7 +20,7 @@ public struct AuthScreen: View {
                             .resizable()
                             .scaledToFit()
                             .frame(maxWidth: 200, maxHeight: 160)
-                            .shadow(color: Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0).opacity(0.15), radius: 10, y: 4)
+                            .shadow(color: BrandPalette.primary.opacity(0.15), radius: 10, y: 4)
 
                         Text(
                             appState.selectedLanguage == .vi
@@ -91,14 +91,14 @@ public struct AuthScreen: View {
                         if let errorMsg = appState.authErrorMessage {
                             HStack(spacing: 8) {
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(BrandPalette.error)
                                 Text(errorMsg)
                                     .font(.footnote)
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(BrandPalette.error)
                                 Spacer()
                             }
                             .padding(10)
-                            .background(Color.red.opacity(0.1))
+                            .background(BrandPalette.error.opacity(0.1))
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
 
@@ -132,14 +132,14 @@ public struct AuthScreen: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 13)
-                            .background(isFormValid ? Color.teal : Color.gray.opacity(0.4))
-                            .foregroundStyle(.white)
+                            .background(isFormValid ? BrandPalette.primary : BrandPalette.mutedText.opacity(0.45))
+                            .foregroundStyle(BrandPalette.cream)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         .disabled(!isFormValid || appState.isBusy)
                     }
                     .padding(20)
-                    .background(Color(.secondarySystemBackground))
+                    .background(BrandPalette.surface)
                     .clipShape(RoundedRectangle(cornerRadius: 18))
                     .padding(.horizontal, 20)
 
@@ -152,7 +152,7 @@ public struct AuthScreen: View {
                             systemImage: "lock.shield.fill"
                         )
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.teal)
+                        .foregroundStyle(BrandPalette.primary)
 
                         Text(
                             appState.selectedLanguage == .vi
@@ -163,7 +163,7 @@ public struct AuthScreen: View {
                         .foregroundStyle(.secondary)
                     }
                     .padding(16)
-                    .background(Color.teal.opacity(0.08))
+                    .background(BrandPalette.cream.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .padding(.horizontal, 20)
                 }

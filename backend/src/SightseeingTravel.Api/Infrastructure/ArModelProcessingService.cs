@@ -27,7 +27,9 @@ public sealed class ArModelProcessingOptions
 public sealed record ArModelBuildStatusResponse(
     Guid CardId,
     string Status,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? ModelName = null,
+    string ModelCategory = "Object");
 
 public sealed record ArModelBuildSubmissionResult(
     bool Success,
@@ -40,6 +42,8 @@ public interface IArModelTaskSubmissionService
     Task<ArModelBuildSubmissionResult> SubmitAsync(
         Guid cardId,
         IReadOnlyList<IFormFile> images,
+        string modelName,
+        string modelCategory,
         CancellationToken cancellationToken);
 }
 
@@ -65,10 +69,28 @@ public sealed class ArModelTaskSubmissionService : IArModelTaskSubmissionService
     public async Task<ArModelBuildSubmissionResult> SubmitAsync(
         Guid cardId,
         IReadOnlyList<IFormFile> images,
+        string modelName,
+        string modelCategory,
         CancellationToken cancellationToken)
     {
         if (!_options.Enabled)
             return Failure(StatusCodes.Status503ServiceUnavailable, "Dịch vụ dựng mô hình 3D chưa được bật.");
+
+        var requestedModelName = modelName.Trim();
+        if (requestedModelName.Length > 200)
+            return Failure(StatusCodes.Status400BadRequest, "Tên vật thể không được vượt quá 200 ký tự.");
+
+        var requestedCategory = modelCategory.Trim();
+        var parsedModelCategory = requestedCategory.Length == 0
+            ? ArModelCategory.Object
+            : requestedCategory.ToLowerInvariant() switch
+        {
+            "food" => ArModelCategory.Food,
+            "object" => ArModelCategory.Object,
+            _ => (ArModelCategory?)null
+        };
+        if (parsedModelCategory is null)
+            return Failure(StatusCodes.Status400BadRequest, "Phân loại vật thể không hợp lệ.");
 
         if (images.Count < _options.MinImages || images.Count > _options.MaxImages)
             return Failure(StatusCodes.Status400BadRequest,
@@ -83,9 +105,19 @@ public sealed class ArModelTaskSubmissionService : IArModelTaskSubmissionService
         if (totalBytes > _options.MaxUploadBytes)
             return Failure(StatusCodes.Status413PayloadTooLarge, "Tổng dung lượng ảnh vượt giới hạn cho phép.");
 
-        var card = await _dbContext.ArInfoCards.FirstOrDefaultAsync(x => x.Id == cardId, cancellationToken);
+        var card = await _dbContext.ArInfoCards
+            .Include(x => x.Localizations)
+            .FirstOrDefaultAsync(x => x.Id == cardId, cancellationToken);
         if (card is null)
             return Failure(StatusCodes.Status404NotFound, "Không tìm thấy thẻ AR.");
+
+        var normalizedModelName = requestedModelName.Length > 0
+            ? requestedModelName
+            : card.Localizations
+                .OrderByDescending(x => x.LanguageCode.Equals("vi", StringComparison.OrdinalIgnoreCase))
+                .ThenBy(x => x.LanguageCode)
+                .Select(x => x.Title)
+                .FirstOrDefault() ?? "Vật thể 3D";
 
         if (card.ModelStatus.Equals("Processing", StringComparison.OrdinalIgnoreCase))
             return Failure(StatusCodes.Status409Conflict, "Thẻ AR này đang được dựng mô hình 3D.");
@@ -148,7 +180,7 @@ public sealed class ArModelTaskSubmissionService : IArModelTaskSubmissionService
             if (string.IsNullOrWhiteSpace(taskId))
                 return Failure(StatusCodes.Status502BadGateway, "Worker không trả về mã tác vụ dựng mô hình.");
 
-            card.BeginModelProcessing(taskId, DateTimeOffset.UtcNow);
+            card.BeginModelProcessing(taskId, normalizedModelName, parsedModelCategory.Value, DateTimeOffset.UtcNow);
             await _dbContext.SaveChangesAsync(cancellationToken);
 
             return new ArModelBuildSubmissionResult(

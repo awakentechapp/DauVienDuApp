@@ -209,7 +209,8 @@ public struct MainTabView: View {
                 }
                 .tag(3)
         }
-        .tint(.teal)
+        .tint(BrandPalette.primary)
+        .toolbarBackground(BrandPalette.paper, for: .tabBar)
         .onAppear {
             locationManager.requestPermissionsAndStartTracking()
         }
@@ -233,157 +234,83 @@ public struct HomePortalView: View {
     public var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    // Hero Banner
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .center) {
-                            Image("LogoHorizontalLight")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 36)
-
-                            Spacer()
-
-                            Button {
-                                let nextLang: AppLanguage = appState.selectedLanguage == .vi ? .en : .vi
-                                Task { await appState.switchLanguage(nextLang) }
-                            } label: {
-                                Text(appState.selectedLanguage.rawValue.uppercased())
-                                    .font(.caption.weight(.bold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0).opacity(0.12))
-                                    .foregroundStyle(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0))
-                                    .clipShape(Capsule())
-                            }
-                        }
-
-                        Text(
-                            appState.selectedLanguage == .vi
-                                ? "Xin chào, \(appState.currentUser?.displayName ?? "Du khách")!"
-                                : "Welcome, \(appState.currentUser?.displayName ?? "Traveler")!"
-                        )
-                        .font(.title2.weight(.heavy))
-
-                        Text(
-                            appState.selectedLanguage == .vi
-                                ? "Khám phá câu chuyện lịch sử tại từng địa danh qua bản đồ GPS trực tiếp và mở Camera AR 360° để xem thông tin cùng ảnh đẹp từ cộng đồng."
-                                : "Explore cultural stories at historical landmarks via live GPS and unlock the 360° AR Camera to view spatial cards and community photos."
-                        )
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                        HStack(spacing: 12) {
-                            Button {
-                                onSwitchTab(2)
-                            } label: {
-                                Label(
-                                    appState.selectedLanguage == .vi ? "Mở Khám Phá (Map & AR)" : "Open Explore Map",
-                                    systemImage: "safari.fill"
-                                )
-                                .font(.subheadline.weight(.bold))
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.teal)
-
-                            Button {
-                                onSwitchTab(1)
-                            } label: {
-                                Label(
-                                    appState.selectedLanguage == .vi ? "Xem Địa Điểm" : "All Places",
-                                    systemImage: "mappin.and.ellipse"
-                                )
-                                .font(.subheadline.weight(.semibold))
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .padding(.top, 4)
-                    }
-                    .padding(18)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-
-                    // Featured Destinations Section
+                VStack(alignment: .leading, spacing: 22) {
                     HStack {
-                        Text(
-                            appState.selectedLanguage == .vi
-                                ? "Địa Điểm Văn Hóa Nổi Bật"
-                                : "Featured Cultural Destinations"
-                        )
-                        .font(.headline)
+                        Image("LogoHorizontalDark")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 34)
+
                         Spacer()
-                        Button(appState.selectedLanguage == .vi ? "Xem tất cả" : "See All") {
-                            onSwitchTab(1)
+
+                        Button {
+                            let nextLang: AppLanguage = appState.selectedLanguage == .vi ? .en : .vi
+                            Task { await appState.switchLanguage(nextLang) }
+                        } label: {
+                            Text(appState.selectedLanguage.rawValue.uppercased())
+                                .font(.caption.weight(.bold))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 7)
+                                .background(BrandPalette.cream)
+                                .foregroundStyle(BrandPalette.primary)
+                                .clipShape(Capsule())
                         }
-                        .font(.subheadline)
+                    }
+                    .padding(.top, 6)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(appState.selectedLanguage == .vi ? "Xin chào, \(appState.currentUser?.displayName ?? "Du khách")" : "Welcome, \(appState.currentUser?.displayName ?? "Traveler")")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(BrandPalette.mutedText)
+                        Text(appState.selectedLanguage == .vi ? "Chạm vào di sản" : "Meet the heritage")
+                            .font(.system(size: 30, weight: .bold, design: .serif))
+                            .foregroundStyle(BrandPalette.text)
+                        Text(appState.selectedLanguage == .vi ? "Mỗi hành trình mở ra một câu chuyện Việt Nam." : "Every journey opens a story of Vietnam.")
+                            .font(.subheadline)
+                            .foregroundStyle(BrandPalette.mutedText)
+                    }
+
+                    homeFeaturedHero
+
+                    HStack(spacing: 12) {
+                        homeShortcut(
+                            title: appState.selectedLanguage == .vi ? "Khám phá bản đồ" : "Explore map",
+                            subtitle: appState.selectedLanguage == .vi ? "Tìm điểm đến quanh bạn" : "Find places nearby",
+                            icon: "map.fill",
+                            action: { onSwitchTab(2) }
+                        )
+                        homeShortcut(
+                            title: appState.selectedLanguage == .vi ? "Địa điểm" : "Places",
+                            subtitle: appState.selectedLanguage == .vi ? "Xem bộ sưu tập" : "Browse the collection",
+                            icon: "building.columns.fill",
+                            action: { onSwitchTab(1) }
+                        )
+                    }
+
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(appState.selectedLanguage == .vi ? "Gần bạn" : "Near you")
+                                .font(.system(size: 24, weight: .bold, design: .serif))
+                                .foregroundStyle(BrandPalette.text)
+                            Text(appState.selectedLanguage == .vi ? "Những nơi đáng dừng chân hôm nay" : "Places worth a stop today")
+                                .font(.caption)
+                                .foregroundStyle(BrandPalette.mutedText)
+                        }
+                        Spacer()
+                        Button(appState.selectedLanguage == .vi ? "Tất cả" : "All") { onSwitchTab(1) }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(BrandPalette.primary)
                     }
 
                     ForEach(featuredPois) { poi in
-                        let liveDist = locationManager.distanceInMeters(
-                            toLatitude: poi.latitude,
-                            longitude: poi.longitude
-                        )
-                        let isUnlocked = poi.isWithinGeofence(userDistanceMeters: liveDist)
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(poi.category.uppercased())
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(.teal)
-                                Spacer()
-                                Text(
-                                    isUnlocked
-                                        ? (appState.selectedLanguage == .vi ? "Đã mở khóa AR • \(Int(liveDist))m" : "AR Ready • \(Int(liveDist))m")
-                                        : "\(Int(liveDist))m"
-                                )
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(isUnlocked ? .green : .orange)
-                            }
-
-                            Text(poi.name)
-                                .font(.title3.weight(.bold))
-
-                            Text(poi.shortSummary)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-
-                            HStack(spacing: 10) {
-                                Button {
-                                    selectedPoiForDetail = poi
-                                } label: {
-                                    Label(
-                                        appState.selectedLanguage == .vi ? "Câu chuyện & Ảnh" : "Story & Photos",
-                                        systemImage: "book.pages.fill"
-                                    )
-                                    .font(.caption.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-
-                                Button {
-                                    onSwitchTab(2)
-                                } label: {
-                                    Label(
-                                        appState.selectedLanguage == .vi ? "Định vị Khám phá" : "Locate on Map",
-                                        systemImage: "map.fill"
-                                    )
-                                    .font(.caption.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.teal)
-                            }
-                        }
-                        .padding(16)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        homePoiRow(poi)
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
             }
-            .navigationTitle(appState.selectedLanguage == .vi ? "Trang Chủ (≤ 50km)" : "Home (≤ 50km)")
+            .background(BrandPalette.paper.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
             .task(id: appState.selectedLanguage) {
                 featuredPois = (try? await APIClient.shared.getNearbyPois(
                     lat: locationManager.latitude,
@@ -411,6 +338,126 @@ public struct HomePortalView: View {
                     .environmentObject(locationManager)
             }
         }
+    }
+
+    private var homeFeaturedHero: some View {
+        let featuredPoi = featuredPois.first
+        return ZStack(alignment: .bottomLeading) {
+            Group {
+                if let coverUrl = featuredPoi?.coverImageUrl, let url = URL(string: coverUrl) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            heroPlaceholder
+                        }
+                    }
+                } else {
+                    heroPlaceholder
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 350)
+            .clipped()
+
+            LinearGradient(colors: [.clear, BrandPalette.primaryDeep.opacity(0.88)], startPoint: .center, endPoint: .bottom)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(featuredPoi?.category.uppercased() ?? (appState.selectedLanguage == .vi ? "HÀNH TRÌNH DI SẢN" : "HERITAGE JOURNEY"))
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.4)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(BrandPalette.cream.opacity(0.2))
+                    .clipShape(Capsule())
+                Text(featuredPoi?.name ?? (appState.selectedLanguage == .vi ? "Việt Nam qua từng dấu chân" : "Vietnam, one story at a time"))
+                    .font(.system(size: 28, weight: .bold, design: .serif))
+                    .lineLimit(2)
+                Text(featuredPoi?.shortSummary ?? (appState.selectedLanguage == .vi ? "Khám phá di sản, văn hóa và những câu chuyện địa phương." : "Discover heritage, culture, and stories from local places."))
+                    .font(.subheadline)
+                    .lineLimit(2)
+                    .foregroundStyle(.white.opacity(0.88))
+                Button {
+                    if let featuredPoi { selectedPoiForDetail = featuredPoi }
+                    else { onSwitchTab(2) }
+                } label: {
+                    Label(appState.selectedLanguage == .vi ? "Khám phá câu chuyện" : "Explore the story", systemImage: "arrow.right")
+                        .font(.subheadline.weight(.bold))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                        .foregroundStyle(BrandPalette.primaryDeep)
+                        .background(BrandPalette.cream)
+                        .clipShape(Capsule())
+                }
+                .padding(.top, 2)
+            }
+            .foregroundStyle(.white)
+            .padding(20)
+        }
+        .frame(height: 350)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .shadow(color: BrandPalette.primaryDeep.opacity(0.16), radius: 14, y: 8)
+    }
+
+    private var heroPlaceholder: some View {
+        LinearGradient(colors: [BrandPalette.terracotta, BrandPalette.primaryDeep], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: "building.columns.fill")
+                    .font(.system(size: 110, weight: .light))
+                    .foregroundStyle(BrandPalette.cream.opacity(0.2))
+                    .padding(28)
+            }
+    }
+
+    private func homeShortcut(title: String, subtitle: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: icon)
+                    .font(.headline)
+                    .foregroundStyle(BrandPalette.primary)
+                    .frame(width: 38, height: 38)
+                    .background(BrandPalette.cream.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.subheadline.weight(.bold)).foregroundStyle(BrandPalette.text)
+                    Text(subtitle).font(.caption).foregroundStyle(BrandPalette.mutedText).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(13)
+            .background(BrandPalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(BrandPalette.border.opacity(0.75), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func homePoiRow(_ poi: NearbyPoiDto) -> some View {
+        let distance = locationManager.distanceInMeters(toLatitude: poi.latitude, longitude: poi.longitude)
+        return Button { selectedPoiForDetail = poi } label: {
+            HStack(spacing: 13) {
+                AsyncImage(url: URL(string: poi.coverImageUrl ?? "")) { phase in
+                    if let image = phase.image { image.resizable().scaledToFill() }
+                    else { BrandPalette.sand.overlay(Image(systemName: "building.columns.fill").foregroundStyle(BrandPalette.primary)) }
+                }
+                .frame(width: 88, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(poi.category.uppercased()).font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(BrandPalette.terracotta)
+                    Text(poi.name).font(.headline).foregroundStyle(BrandPalette.text).lineLimit(2)
+                    Label(distance < 1000 ? "\(Int(distance))m" : String(format: "%.1fkm", distance / 1000), systemImage: "location.fill")
+                        .font(.caption).foregroundStyle(BrandPalette.mutedText)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(BrandPalette.primary)
+            }
+            .padding(10)
+            .background(BrandPalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(BrandPalette.border.opacity(0.75), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -453,7 +500,7 @@ public struct PlacesDirectoryView: View {
                     HStack {
                         Text(poi.category.uppercased())
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.teal)
+                            .foregroundStyle(BrandPalette.terracotta)
                         Spacer()
                         Text(
                             isUnlocked
@@ -461,7 +508,7 @@ public struct PlacesDirectoryView: View {
                                 : (appState.selectedLanguage == .vi ? "Cách \(Int(liveDist))m" : "\(Int(liveDist))m away")
                         )
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(isUnlocked ? .green : .secondary)
+                        .foregroundStyle(isUnlocked ? BrandPalette.terracotta : BrandPalette.mutedText)
                     }
 
                     Text(poi.name)
@@ -494,7 +541,7 @@ public struct PlacesDirectoryView: View {
                             .font(.caption.weight(.semibold))
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.teal)
+                        .tint(BrandPalette.primary)
                     }
                     .padding(.top, 4)
                 }
@@ -570,7 +617,7 @@ public struct MyPhotosView: View {
                                     img.resizable().scaledToFill()
                                 default:
                                     ZStack {
-                                        Color.gray.opacity(0.18)
+                                        BrandPalette.sand
                                         Image(systemName: "photo")
                                             .foregroundStyle(.secondary)
                                     }
@@ -587,7 +634,7 @@ public struct MyPhotosView: View {
                                 HStack(spacing: 12) {
                                     Label("\(photo.likesCount)", systemImage: "heart.fill")
                                         .font(.caption)
-                                        .foregroundStyle(.pink)
+                                        .foregroundStyle(BrandPalette.terracotta)
 
                                     if let azimuth = photo.azimuthDegrees {
                                         Label("\(Int(azimuth))°", systemImage: "safari")
@@ -770,7 +817,7 @@ public struct ProfileSettingsView: View {
                     Section {
                         Text(banner)
                             .font(.footnote)
-                            .foregroundStyle(.teal)
+                            .foregroundStyle(BrandPalette.primary)
                     }
                 }
 
@@ -784,7 +831,7 @@ public struct ProfileSettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Dấu Viễn Du")
                                 .font(.subheadline.weight(.bold))
-                                .foregroundStyle(Color(red: 0x62/255.0, green: 0x28/255.0, blue: 0x21/255.0))
+                                .foregroundStyle(BrandPalette.primary)
                             Text(appState.selectedLanguage == .vi
                                  ? "Dấu viễn du · Phiên bản v\(appVersion)"
                                  : "Vintage Heritage Stamp · v\(appVersion)")
@@ -842,9 +889,9 @@ public struct RoleBadgeView: View {
 
     private var badgeColor: Color {
         switch role {
-        case .superAdmin: return .purple
-        case .admin: return .orange
-        case .tourist: return .teal
+        case .superAdmin: return BrandPalette.primaryDeep
+        case .admin: return BrandPalette.terracotta
+        case .tourist: return BrandPalette.primary
         }
     }
 }

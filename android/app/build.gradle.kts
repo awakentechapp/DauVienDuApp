@@ -11,8 +11,8 @@ android {
         applicationId = "com.awaken.sightseeingtravel"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 9
+        versionName = "1.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -20,7 +20,7 @@ android {
         }
 
         buildConfigField("String", "API_BASE_URL", "\"https://dauviendu.awaken.asia/\"")
-        buildConfigField("String", "OPENFREEMAP_STYLE_URL", "\"https://tiles.openfreemap.org/styles/bright\"")
+        buildConfigField("String", "OPENFREEMAP_STYLE_URL", "\"https://tiles.openfreemap.org/styles/liberty\"")
     }
 
     buildTypes {

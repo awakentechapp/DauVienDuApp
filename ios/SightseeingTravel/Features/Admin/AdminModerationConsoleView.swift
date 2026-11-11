@@ -234,8 +234,8 @@ public struct AdminModerationConsoleView: View {
                 .font(.caption.weight(.bold))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(isSelected ? Color.teal : Color.secondary.opacity(0.15))
-                .foregroundStyle(isSelected ? .white : .primary)
+                .background(isSelected ? BrandPalette.primary : Color.secondary.opacity(0.15))
+                .foregroundStyle(isSelected ? BrandPalette.cream : .primary)
                 .clipShape(Capsule())
         }
     }
@@ -540,8 +540,8 @@ private struct AdminPoiRowCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(Color.teal.opacity(0.14))
-                .foregroundStyle(.teal)
+                .background(BrandPalette.cream)
+                .foregroundStyle(BrandPalette.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
@@ -670,7 +670,7 @@ private struct CreateFixedArCardSheet: View {
                     )
                     Text(gpsStatusText)
                         .font(.caption)
-                        .foregroundStyle(isAtPoi ? .green : .orange)
+                        .foregroundStyle(isAtPoi ? BrandPalette.primary : BrandPalette.terracotta)
                 }
 
                 Section(language == .vi ? "Nội dung thẻ AR" : "AR card content") {

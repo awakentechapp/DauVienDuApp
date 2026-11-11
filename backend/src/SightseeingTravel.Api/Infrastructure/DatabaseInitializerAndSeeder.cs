@@ -66,6 +66,16 @@ public static class DatabaseInitializerAndSeeder
             await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
         }
 
+        var arModelCatalogMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0005_ArModelCatalogMetadata.sql")
+            ?? throw new InvalidOperationException("AR model catalog metadata migration resource is missing.");
+        await using (arModelCatalogMigration)
+        using (var reader = new StreamReader(arModelCatalogMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users

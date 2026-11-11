@@ -339,7 +339,9 @@ data class AdminArInfoCardDto(
     @SerializedName("localizations") val localizations: List<ArCardLocalizationInputDto> = emptyList(),
     @SerializedName("modelStatus") val modelStatus: String = "None",
     @SerializedName("modelError") val modelError: String? = null,
-    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Double = 0.0
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Double = 0.0,
+    @SerializedName("modelName") val modelName: String? = null,
+    @SerializedName("modelCategory") val modelCategory: String = "Object"
 )
 
 data class ArModelLibraryItemDto(
@@ -347,7 +349,8 @@ data class ArModelLibraryItemDto(
     @SerializedName("sourcePoiId") val sourcePoiId: String,
     @SerializedName("name") val name: String,
     @SerializedName("modelUrl") val modelUrl: String,
-    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float = 0f
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float = 0f,
+    @SerializedName("category") val category: String = "Object"
 )
 
 data class PlaceArModelRequest(
@@ -368,7 +371,9 @@ data class ArModelBuildSubmissionDto(
 data class ArModelBuildStatusDto(
     @SerializedName("cardId") val cardId: String,
     @SerializedName("status") val status: String,
-    @SerializedName("errorMessage") val errorMessage: String? = null
+    @SerializedName("errorMessage") val errorMessage: String? = null,
+    @SerializedName("modelName") val modelName: String? = null,
+    @SerializedName("modelCategory") val modelCategory: String = "Object"
 )
 
 data class CreateOrUpdatePoiRequest(

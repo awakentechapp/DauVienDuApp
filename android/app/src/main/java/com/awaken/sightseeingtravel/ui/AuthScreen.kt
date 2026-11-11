@@ -68,11 +68,11 @@ private enum class AuthPage {
 }
 
 private object AuthPalette {
-    val ink = Color(0xFF3B211E)
-    val brick = Color(0xFF8A342A)
-    val teal = Color(0xFF176D68)
-    val paper = Color(0xFFFFFCF7)
-    val muted = Color(0xFF786C65)
+    val ink = BrandColors.Text
+    val brick = BrandColors.Primary
+    val teal = BrandColors.Terracotta
+    val paper = BrandColors.Surface
+    val muted = BrandColors.MutedText
 }
 
 @Composable
@@ -109,7 +109,7 @@ internal fun AuthScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFFF0DFCE), AuthPalette.paper, Color(0xFFFFF8EF))
+                    colors = listOf(BrandColors.Sand, AuthPalette.paper, BrandColors.Paper)
                 )
             )
     ) {
@@ -119,7 +119,7 @@ internal fun AuthScreen(
                 .padding(top = 68.dp, end = 20.dp)
                 .size(94.dp),
             shape = CircleShape,
-            color = Color(0xFFE5C8AB).copy(alpha = 0.22f)
+            color = BrandColors.Cream.copy(alpha = 0.28f)
         ) {}
 
         Column(
@@ -465,12 +465,12 @@ private fun AuthForm(
                 if (!errorMessage.isNullOrBlank()) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFFFFE8E5),
+                        color = BrandColors.Sand,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = errorMessage,
-                            color = Color(0xFF9D3128),
+                            color = BrandColors.Error,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(12.dp)
                         )

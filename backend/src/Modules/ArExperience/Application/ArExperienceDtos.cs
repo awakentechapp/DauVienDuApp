@@ -51,14 +51,17 @@ public sealed record AdminArInfoCardDto(
     IReadOnlyList<ArCardLocalizationInputDto> Localizations,
     string ModelStatus = "None",
     string? ModelError = null,
-    double ModelRotationDegrees = 0.0);
+    double ModelRotationDegrees = 0.0,
+    string? ModelName = null,
+    string ModelCategory = "Object");
 
 public sealed record ArModelLibraryItemDto(
     Guid SourceCardId,
     Guid SourcePoiId,
     string Name,
     string ModelUrl,
-    double ModelRotationDegrees);
+    double ModelRotationDegrees,
+    string Category = "Object");
 
 public sealed record PlaceArModelRequest(
     Guid SourceCardId,

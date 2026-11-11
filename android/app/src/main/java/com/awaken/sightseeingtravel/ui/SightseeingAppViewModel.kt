@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import retrofit2.HttpException
 import java.io.File
@@ -1216,9 +1217,20 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    suspend fun buildAdminArCard3dModel(cardId: String, imageFiles: List<File>): String? {
+    suspend fun buildAdminArCard3dModel(
+        cardId: String,
+        imageFiles: List<File>,
+        modelName: String,
+        modelCategory: String
+    ): String? {
         if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
             return "Chỉ tài khoản Admin hoặc Super Admin mới được dựng mô hình AR 3D."
+        }
+        if (modelName.isBlank() || modelName.length > 200) {
+            return "Tên vật thể phải có từ 1 đến 200 ký tự."
+        }
+        if (modelCategory !in setOf("Food", "Object")) {
+            return "Hãy chọn phân loại Món ăn hoặc Vật dụng."
         }
         if (imageFiles.size !in 12..32) {
             return "Cần chụp từ 12 đến 32 ảnh trước khi dựng mô hình."
@@ -1244,7 +1256,13 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                     image.asRequestBody(mediaType)
                 )
             }
-            val response = apiService.submitArCard3dModel(cardId, imageParts)
+            val textPlain = "text/plain".toMediaTypeOrNull()
+            val response = apiService.submitArCard3dModel(
+                cardId,
+                imageParts,
+                modelName.trim().toRequestBody(textPlain),
+                modelCategory.toRequestBody(textPlain)
+            )
             if (!response.isSuccessful) {
                 return "Không gửi được ảnh để dựng mô hình (HTTP ${response.code()})."
             }
@@ -1255,7 +1273,12 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 state.copy(
                     adminArCardsByPoi = state.adminArCardsByPoi.mapValues { (_, cards) ->
                         cards.map { card ->
-                            if (card.id == cardId) card.copy(modelStatus = body.status, modelError = null) else card
+                            if (card.id == cardId) card.copy(
+                                modelStatus = body.status,
+                                modelError = null,
+                                modelName = modelName.trim(),
+                                modelCategory = modelCategory
+                            ) else card
                         }
                     },
                     statusBannerMessage = body.message
@@ -1274,6 +1297,10 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                                     cards.map { card ->
                                         if (card.id == cardId) {
                                             card.copy(modelStatus = status.status, modelError = status.errorMessage)
+                                                .copy(
+                                                    modelName = status.modelName ?: card.modelName,
+                                                    modelCategory = status.modelCategory
+                                                )
                                         } else card
                                     }
                                 },

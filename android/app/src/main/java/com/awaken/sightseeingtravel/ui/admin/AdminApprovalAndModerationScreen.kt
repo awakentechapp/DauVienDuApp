@@ -34,6 +34,7 @@ import kotlin.math.roundToInt
 import coil.compose.AsyncImage
 import com.awaken.sightseeingtravel.core.model.*
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
+import com.awaken.sightseeingtravel.ui.BrandColors
 import kotlinx.coroutines.launch
 import androidx.core.content.ContextCompat
 import java.io.File
@@ -64,7 +65,7 @@ fun AdminApprovalAndModerationScreen(
     onPlaceExistingArModel: suspend (String, PlaceArModelRequest) -> String?,
     onUpdateArInfoCard: suspend (String, UpsertArInfoCardRequest) -> String?,
     onDeleteArInfoCard: suspend (String) -> String?,
-    onBuildArCard3dModel: suspend (String, List<File>) -> String?,
+    onBuildArCard3dModel: suspend (String, List<File>, String, String) -> String?,
     onFilterStatusChange: (String?) -> Unit,
     onCreatePoiSubmit: (CreateOrUpdatePoiRequest, Uri?) -> Unit,
     onUpdatePoiSubmit: (String, CreateOrUpdatePoiRequest, Uri?) -> Unit,
@@ -96,6 +97,17 @@ fun AdminApprovalAndModerationScreen(
     var isArModelCameraActive by remember { mutableStateOf(false) }
     var arModelImageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var arModelCameraSessionError by remember { mutableStateOf<String?>(null) }
+    var arModelName by remember(arCardFor3dModel?.id) {
+        mutableStateOf(
+            arCardFor3dModel?.modelName?.takeIf { it.isNotBlank() }
+                ?: arCardFor3dModel?.localizations
+                ?.firstOrNull { it.languageCode.equals("vi", ignoreCase = true) }
+                ?.title.orEmpty()
+        )
+    }
+    var arModelCategory by remember(arCardFor3dModel?.id) {
+        mutableStateOf(arCardFor3dModel?.modelCategory?.takeIf { it in setOf("Food", "Object") } ?: "Object")
+    }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasCameraPermission by remember {
@@ -410,9 +422,36 @@ fun AdminApprovalAndModerationScreen(
                     arCardFor3dModel = null
                 }
             },
-            title = { Text("Chụp nhiều góc để dựng vật thể 3D") },
+            title = { Text("Tạo vật thể 3D cho thẻ AR") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = arModelName,
+                        onValueChange = { arModelName = it.take(200) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Tên vật thể") },
+                        singleLine = true,
+                        enabled = !isSubmittingArModel
+                    )
+                    Text("Phân loại vật thể", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = arModelCategory == "Food",
+                            onClick = { arModelCategory = "Food" },
+                            enabled = !isSubmittingArModel,
+                            label = { Text("Món ăn") }
+                        )
+                        FilterChip(
+                            selected = arModelCategory == "Object",
+                            onClick = { arModelCategory = "Object" },
+                            enabled = !isSubmittingArModel,
+                            label = { Text("Vật dụng") }
+                        )
+                    }
+                    Text("Chụp nhiều góc để dựng vật thể 3D")
                     Text("Chụp một vòng quanh vật thể ở nhiều góc độ. Màn hình không hiển thị ảnh preview; camera chụp liên tục ngay trong app.")
                     Text("Máy chủ sẽ tự động dùng AI tách nền khi dựng 3D. Tính năng tách nền đang ở mức thử nghiệm, nên nền đơn giản và tương phản với vật thể sẽ cho kết quả tốt hơn.", style = MaterialTheme.typography.bodySmall)
                     Text("${arModelCaptureFiles.size}/32 ảnh", fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -479,7 +518,12 @@ fun AdminApprovalAndModerationScreen(
                             isArModelCameraActive = false
                             scope.launch {
                                 isSubmittingArModel = true
-                                arModelCaptureError = onBuildArCard3dModel(card.id, arModelCaptureFiles.toList())
+                                arModelCaptureError = onBuildArCard3dModel(
+                                    card.id,
+                                    arModelCaptureFiles.toList(),
+                                    arModelName.trim(),
+                                    arModelCategory
+                                )
                                 isSubmittingArModel = false
                                 if (arModelCaptureError == null) {
                                     arModelCaptureFiles.forEach { it.delete() }
@@ -488,7 +532,8 @@ fun AdminApprovalAndModerationScreen(
                                 }
                             }
                         },
-                        enabled = !isSubmittingArModel && !isTakingArModelPhoto
+                        enabled = !isSubmittingArModel && !isTakingArModelPhoto &&
+                            arModelName.isNotBlank() && arModelCategory in setOf("Food", "Object")
                     ) { Text("Ghép ảnh dựng vật thể 3D") }
                 }
             },
@@ -637,7 +682,7 @@ private fun PoiApprovalWorkflowTab(
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Role explanation banner
         Surface(
-            color = if (isSuperAdmin) Color(0xFFDCFCE7) else Color(0xFFE0F2FE),
+            color = if (isSuperAdmin) BrandColors.Cream.copy(alpha = 0.62f) else BrandColors.Sand,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -648,7 +693,7 @@ private fun PoiApprovalWorkflowTab(
                 Icon(
                     imageVector = if (isSuperAdmin) Icons.Default.VerifiedUser else Icons.Default.Info,
                     contentDescription = null,
-                    tint = if (isSuperAdmin) Color(0xFF15803D) else Color(0xFF0369A1)
+                    tint = if (isSuperAdmin) BrandColors.Primary else BrandColors.Terracotta
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
@@ -657,7 +702,7 @@ private fun PoiApprovalWorkflowTab(
                     } else {
                         "Admin Mode: New or edited POIs enter 'PendingApproval' and require SuperAdmin approval before appearing on the Tourist Map."
                     },
-                    color = if (isSuperAdmin) Color(0xFF14532D) else Color(0xFF0C4A6E),
+                    color = BrandColors.PrimaryDeep,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -802,7 +847,7 @@ private fun PoiApprovalWorkflowTab(
                         Button(
                             onClick = { onPlace3dModel(poi) },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E7490))
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandColors.Primary)
                         ) {
                             Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -942,6 +987,13 @@ private fun ArInfoCardAdminItem(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(if (card.modelStatus.equals("Ready", true)) "Dựng lại" else "Tạo 3D")
                 }
+            }
+            if (!card.modelName.isNullOrBlank()) {
+                Text(
+                    text = "${card.modelName} • ${modelCategoryLabel(card.modelCategory, selectedLanguage.equals("en", true))}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BrandColors.Terracotta
+                )
             }
         }
     }

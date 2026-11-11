@@ -11,6 +11,12 @@ public enum ArCardType
     DirectionHint = 4
 }
 
+public enum ArModelCategory
+{
+    Food = 1,
+    Object = 2
+}
+
 public sealed class ArInfoCard : AuditableEntity
 {
     public const double MinAzimuthDegrees = 0.0;
@@ -28,6 +34,8 @@ public sealed class ArInfoCard : AuditableEntity
     public int DisplayOrder { get; set; }
     public bool IsActive { get; set; } = true;
     public string? ModelObjectKey { get; private set; }
+    public string? ModelName { get; private set; }
+    public ArModelCategory ModelCategory { get; private set; } = ArModelCategory.Object;
     public string ModelStatus { get; private set; } = "None";
     public string? ModelError { get; private set; }
     public string? NodeOdmTaskId { get; private set; }
@@ -195,9 +203,15 @@ public sealed class ArInfoCard : AuditableEntity
         return Result.Success();
     }
 
-    public void BeginModelProcessing(string nodeOdmTaskId, DateTimeOffset nowUtc)
+    public void BeginModelProcessing(
+        string nodeOdmTaskId,
+        string modelName,
+        ArModelCategory modelCategory,
+        DateTimeOffset nowUtc)
     {
         NodeOdmTaskId = nodeOdmTaskId;
+        ModelName = modelName.Trim();
+        ModelCategory = modelCategory;
         ModelStatus = "Processing";
         ModelError = null;
         UpdatedAt = nowUtc;
@@ -212,7 +226,12 @@ public sealed class ArInfoCard : AuditableEntity
         UpdatedAt = nowUtc;
     }
 
-    public Result AttachExistingModel(string objectKey, double modelRotationDegrees, DateTimeOffset nowUtc)
+    public Result AttachExistingModel(
+        string objectKey,
+        double modelRotationDegrees,
+        string? modelName,
+        ArModelCategory modelCategory,
+        DateTimeOffset nowUtc)
     {
         if (string.IsNullOrWhiteSpace(objectKey))
         {
@@ -231,6 +250,8 @@ public sealed class ArInfoCard : AuditableEntity
         }
 
         ModelObjectKey = objectKey;
+        ModelName = string.IsNullOrWhiteSpace(modelName) ? null : modelName.Trim();
+        ModelCategory = modelCategory;
         ModelRotationDegrees = ((modelRotationDegrees % 360.0) + 360.0) % 360.0;
         ModelStatus = "Ready";
         ModelError = null;

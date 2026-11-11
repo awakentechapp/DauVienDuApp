@@ -41,14 +41,15 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
-/**
- * Official OpenFreeMap/Bright Vector Tile Style URL for Android MapLibre.
- */
-const val OPENFREEMAP_BRIGHT_STYLE_URL = "https://tiles.openfreemap.org/styles/bright"
+/** OpenFreeMap Liberty includes vector building data with 3D building extrusion. */
+const val OPENFREEMAP_3D_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+
+private const val MAP_3D_DEFAULT_TILT_DEGREES = 55.0
 
 /**
  * Native MapLibre GL Compose View (`org.maplibre.gl:android-sdk`) configured with:
- * - Vector tile style: `OpenFreeMap/Bright` (`https://tiles.openfreemap.org/styles/bright`)
+ * - Vector tile style: `OpenFreeMap/Liberty` with 3D building extrusion
+ * - Default camera tilt: 55 degrees so 3D buildings are visible at close zoom levels
  * - Automatic OpenStreetMap Raster Tile JSON fallback if vector tiles are unreachable
  * - Real-time GPS Location Marker + Published POI Heritage & Food (`Ăn uống`) Pins within 50km radius
  */
@@ -123,7 +124,7 @@ fun OpenFreeMapComposeView(
                         .target(LatLng(spatialPose.latitude, spatialPose.longitude))
                         .zoom(14.8)
                         .bearing(spatialPose.courseDegrees.toDouble())
-                        .tilt(30.0)
+                        .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
                         .build()
                 ),
                 900
@@ -142,7 +143,7 @@ fun OpenFreeMapComposeView(
                 CameraPosition.Builder()
                     .target(LatLng(focusedPoi.latitude, focusedPoi.longitude))
                     .zoom(15.5)
-                    .tilt(25.0)
+                    .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
                     .build()
             ),
             750
@@ -167,7 +168,7 @@ fun OpenFreeMapComposeView(
                     .target(LatLng(spatialPose.latitude, spatialPose.longitude))
                     .zoom(16.8)
                     .bearing(spatialPose.courseDegrees.toDouble())
-                    .tilt(45.0)
+                    .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
                     .build()
             ),
             750
@@ -193,7 +194,7 @@ fun OpenFreeMapComposeView(
                     .target(LatLng(spatialPose.latitude, spatialPose.longitude))
                     .zoom(17.0)
                     .bearing(spatialPose.courseDegrees.toDouble())
-                    .tilt(48.0)
+                    .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
                     .build()
             ),
             650
@@ -233,10 +234,15 @@ fun OpenFreeMapComposeView(
             hasCenteredInitially = true
             val focusedPoi = pois.firstOrNull { it.id == focusedPoiId }
             map.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    focusedPoi?.let { LatLng(it.latitude, it.longitude) }
-                        ?: LatLng(spatialPose.latitude, spatialPose.longitude),
-                    if (focusedPoi != null) 15.5 else 14.5
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder()
+                        .target(
+                            focusedPoi?.let { LatLng(it.latitude, it.longitude) }
+                                ?: LatLng(spatialPose.latitude, spatialPose.longitude)
+                        )
+                        .zoom(if (focusedPoi != null) 15.5 else 14.5)
+                        .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
+                        .build()
                 ),
                 750
             )
@@ -248,7 +254,7 @@ fun OpenFreeMapComposeView(
             modifier = Modifier.fillMaxSize(),
             factory = {
                 mapView.apply {
-                    // Fallback to OpenStreetMap if OpenFreeMap/Bright style fails to load
+                    // Raster fallback keeps the map usable if OpenFreeMap Liberty cannot load.
                     addOnDidFailLoadingMapListener {
                         mapLibreInstance?.setStyle(
                             Style.Builder().fromJson(buildOpenStreetMapFallbackStyleJson())
@@ -274,7 +280,7 @@ fun OpenFreeMapComposeView(
                         map.uiSettings.isTiltGesturesEnabled = true
                         map.uiSettings.isAttributionEnabled = true
 
-                        loadOpenFreeMapBrightStyle(
+                        loadOpenFreeMapLibertyStyle(
                             context = context,
                             map = map,
                             onStyleReady = { style ->
@@ -357,14 +363,14 @@ private const val PROP_GPS_ICON = "gps_icon"
 private const val PROP_GPS_COURSE = "gps_course"
 
 /**
- * Loads `OpenFreeMap/Bright` vector style (`https://tiles.openfreemap.org/styles/bright`).
+ * Loads OpenFreeMap Liberty, whose style includes the `building-3d` extrusion layer.
  */
-private fun loadOpenFreeMapBrightStyle(
+private fun loadOpenFreeMapLibertyStyle(
     context: Context,
     map: MapLibreMap,
     onStyleReady: (Style) -> Unit
 ) {
-    map.setStyle(Style.Builder().fromUri(OPENFREEMAP_BRIGHT_STYLE_URL)) { style ->
+    map.setStyle(Style.Builder().fromUri(OPENFREEMAP_3D_STYLE_URL)) { style ->
         setupCustomPinBitmapsAndLayers(context, style)
         onStyleReady(style)
     }
@@ -376,7 +382,7 @@ private fun loadOpenFreeMapBrightStyle(
 fun buildOpenStreetMapFallbackStyleJson(): String = """
 {
   "version": 8,
-  "name": "OpenFreeMap/Bright - OSM Fallback",
+  "name": "OpenStreetMap Raster Fallback",
   "sources": {
     "osm-raster-tiles": {
       "type": "raster",
@@ -384,7 +390,7 @@ fun buildOpenStreetMapFallbackStyleJson(): String = """
         "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       ],
       "tileSize": 256,
-      "attribution": "© OpenFreeMap/Bright • © OpenStreetMap contributors"
+      "attribution": "© OpenStreetMap contributors"
     }
   },
   "layers": [
@@ -405,10 +411,10 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     style.addImage(ICON_NAVIGATION_WALKING, createNavigationMarkerBitmap(density, NavigationTravelMode.WALKING))
     style.addImage(ICON_NAVIGATION_CAR, createNavigationMarkerBitmap(density, NavigationTravelMode.CAR))
     style.addImage(ICON_NAVIGATION_MOTORCYCLE, createNavigationMarkerBitmap(density, NavigationTravelMode.MOTORCYCLE))
-    style.addImage(ICON_POI_LOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#0284C7"), ringColor = Color.WHITE))
-    style.addImage(ICON_POI_FOOD, createPoiPinBitmap(density, fillColor = Color.parseColor("#E11D48"), ringColor = Color.parseColor("#FFE4E6")))
-    style.addImage(ICON_POI_UNLOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#16A34A"), ringColor = Color.parseColor("#BBF7D0")))
-    style.addImage(ICON_POI_SELECTED, createPoiPinBitmap(density, fillColor = Color.parseColor("#EA580C"), ringColor = Color.parseColor("#FEF08A")))
+    style.addImage(ICON_POI_LOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#622821"), ringColor = Color.parseColor("#F6DCAD")))
+    style.addImage(ICON_POI_FOOD, createPoiPinBitmap(density, fillColor = Color.parseColor("#9A4333"), ringColor = Color.parseColor("#FFF9F0")))
+    style.addImage(ICON_POI_UNLOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#9A4333"), ringColor = Color.parseColor("#F6DCAD")))
+    style.addImage(ICON_POI_SELECTED, createPoiPinBitmap(density, fillColor = Color.parseColor("#3F1D18"), ringColor = Color.parseColor("#F6DCAD")))
 
     if (style.getSource(SOURCE_NAVIGATION_ROUTE) == null) {
         style.addSource(GeoJsonSource(SOURCE_NAVIGATION_ROUTE))
@@ -416,7 +422,7 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     if (style.getLayer(LAYER_NAVIGATION_ROUTE) == null) {
         style.addLayer(
             LineLayer(LAYER_NAVIGATION_ROUTE, SOURCE_NAVIGATION_ROUTE).withProperties(
-                lineColor(Color.parseColor("#2563EB")),
+                lineColor(Color.parseColor("#9A4333")),
                 lineWidth(5.0f),
                 lineOpacity(0.9f)
             )
@@ -435,10 +441,11 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
                 iconPadding(14f),
                 textField("{$PROP_POI_TITLE}"),
                 textSize(12.5f),
+                textFont(arrayOf("Noto Sans Regular")),
                 textOffset(arrayOf(0f, 1.8f)),
-                textColor(Color.parseColor("#0F172A")),
-                textHaloColor(Color.WHITE),
-                textHaloWidth(1.8f)
+                textColor(Color.parseColor("#622821")),
+                textHaloColor(Color.parseColor("#FFF9F0")),
+                textHaloWidth(2.8f)
             )
         )
     }
@@ -452,7 +459,14 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
                 iconImage(ICON_POI_SELECTED),
                 iconSize(1.28f),
                 iconAllowOverlap(true),
-                iconIgnorePlacement(true)
+                iconIgnorePlacement(true),
+                textField("{$PROP_POI_TITLE}"),
+                textSize(13.5f),
+                textFont(arrayOf("Noto Sans Bold")),
+                textOffset(arrayOf(0f, 2.2f)),
+                textColor(Color.parseColor("#622821")),
+                textHaloColor(Color.WHITE),
+                textHaloWidth(1.4f)
             )
         )
     }
@@ -514,8 +528,9 @@ private fun updateGeoJsonLayers(
         gpsSource?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
     }
 
+    val selectedPoi = pois.firstOrNull { it.id == selectedPoiId }
     val poiSource = style.getSourceAs<GeoJsonSource>(SOURCE_POI_PINS)
-    val features = pois.map { poi ->
+    val features = pois.filterNot { it.id == selectedPoiId }.map { poi ->
         val liveDistance = LocationAndOrientationTracker.calculateDistanceMeters(
             spatialPose.latitude,
             spatialPose.longitude,
@@ -540,7 +555,6 @@ private fun updateGeoJsonLayers(
     }
     poiSource?.setGeoJson(FeatureCollection.fromFeatures(features))
 
-    val selectedPoi = pois.firstOrNull { it.id == selectedPoiId }
     val selectedSource = style.getSourceAs<GeoJsonSource>(SOURCE_POI_SELECTED)
     if (selectedPoi != null) {
         val selectedProperties = JsonObject().apply {
@@ -565,19 +579,19 @@ private fun createUserGpsDotBitmap(density: Float): Bitmap {
     val center = sizePx / 2f
 
     val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(75, 37, 99, 235)
+        color = Color.argb(75, 98, 40, 33)
         style = Paint.Style.FILL
     }
     canvas.drawCircle(center, center, center, haloPaint)
 
     val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = Color.parseColor("#F6DCAD")
         style = Paint.Style.FILL
     }
     canvas.drawCircle(center, center, center * 0.62f, borderPaint)
 
     val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2563EB")
+        color = Color.parseColor("#622821")
         style = Paint.Style.FILL
     }
     canvas.drawCircle(center, center, center * 0.46f, dotPaint)
@@ -590,14 +604,14 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
     val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val center = sizePx / 2f
-    val blue = Color.parseColor("#2563EB")
+    val brand = Color.parseColor("#622821")
 
     canvas.drawCircle(
         center,
         center,
         center * 0.96f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(55, 15, 23, 42)
+            color = Color.argb(55, 63, 29, 24)
             style = Paint.Style.FILL
         }
     )
@@ -606,7 +620,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
         center,
         center * 0.87f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
+            color = Color.parseColor("#F6DCAD")
             style = Paint.Style.FILL
         }
     )
@@ -615,20 +629,20 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
         center,
         center * 0.74f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = blue
+            color = brand
             style = Paint.Style.FILL
         }
     )
 
     val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = Color.parseColor("#F6DCAD")
         style = Paint.Style.STROKE
         strokeWidth = sizePx * 0.065f
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     val fillGlyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = Color.parseColor("#F6DCAD")
         style = Paint.Style.FILL
     }
     val path = Path()
@@ -651,7 +665,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
                 center * 0.08f,
                 center * 0.08f,
                 Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = blue
+                    color = brand
                     style = Paint.Style.FILL
                 }
             )
@@ -660,7 +674,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
                 center * 0.06f,
                 center * 0.06f,
                 Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = blue
+                    color = brand
                     style = Paint.Style.FILL
                 }
             )
@@ -668,7 +682,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
 
         NavigationTravelMode.MOTORCYCLE -> {
             val wheelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
+                color = Color.parseColor("#F6DCAD")
                 style = Paint.Style.STROKE
                 strokeWidth = sizePx * 0.055f
             }

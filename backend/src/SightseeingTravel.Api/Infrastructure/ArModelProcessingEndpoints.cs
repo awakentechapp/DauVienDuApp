@@ -28,6 +28,8 @@ public static class ArModelProcessingEndpoints
                 var result = await taskSubmissionService.SubmitAsync(
                     cardId,
                     form.Files.ToArray(),
+                    form["modelName"].ToString(),
+                    form["modelCategory"].ToString(),
                     cancellationToken);
 
                 var body = new
@@ -53,12 +55,17 @@ public static class ArModelProcessingEndpoints
             var card = await dbContext.ArInfoCards
                 .AsNoTracking()
                 .Where(x => x.Id == cardId)
-                .Select(x => new { x.Id, x.ModelStatus, x.ModelError })
+                .Select(x => new { x.Id, x.ModelStatus, x.ModelError, x.ModelName, x.ModelCategory })
                 .FirstOrDefaultAsync(cancellationToken);
 
             return card is null
                 ? Results.NotFound(new { code = "AR_CARD_NOT_FOUND", message = "Không tìm thấy thẻ AR." })
-                : Results.Ok(new ArModelBuildStatusResponse(card.Id, card.ModelStatus, card.ModelError));
+                : Results.Ok(new ArModelBuildStatusResponse(
+                    card.Id,
+                    card.ModelStatus,
+                    card.ModelError,
+                    card.ModelName,
+                    card.ModelCategory.ToString()));
         });
 
         return app;

@@ -77,7 +77,7 @@ public struct ArCameraExperienceView: View {
 
                 HStack(spacing: 8) {
                     Image(systemName: isWithinPoiZone ? "scope" : "location.slash.fill")
-                        .foregroundStyle(isWithinPoiZone ? .green : .yellow)
+                        .foregroundStyle(isWithinPoiZone ? BrandPalette.cream : BrandPalette.terracotta)
                     Text(gpsZoneStatus)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white)
@@ -85,7 +85,7 @@ public struct ArCameraExperienceView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(Color.black.opacity(0.65))
+                .background(BrandPalette.primaryDeep.opacity(0.92))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 16)
 
@@ -110,13 +110,13 @@ public struct ArCameraExperienceView: View {
                 if let errorMessage = errorMessage {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(BrandPalette.cream)
                         Text(errorMessage)
                             .font(.caption)
                             .foregroundStyle(.white)
                     }
                     .padding(10)
-                    .background(Color.black.opacity(0.65))
+                    .background(BrandPalette.primaryDeep.opacity(0.92))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 16)
                 }
@@ -181,7 +181,7 @@ public struct ArCameraExperienceView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Image(systemName: "arkit")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(BrandPalette.cream)
                     Text(arContext?.poiName ?? poi.name)
                         .font(.headline)
                         .foregroundStyle(.white)
@@ -212,8 +212,8 @@ public struct ArCameraExperienceView: View {
                     .font(.caption.weight(.bold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color.teal)
-                    .foregroundStyle(.white)
+                    .background(BrandPalette.terracotta)
+                    .foregroundStyle(BrandPalette.cream)
                     .clipShape(Capsule())
             }
 
@@ -226,7 +226,7 @@ public struct ArCameraExperienceView: View {
             }
         }
         .padding(12)
-        .background(Color.black.opacity(0.55))
+        .background(BrandPalette.primaryDeep.opacity(0.92))
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
@@ -243,19 +243,19 @@ public struct ArCameraExperienceView: View {
                         systemImage: "sparkles.rectangle.stack.fill"
                     )
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(BrandPalette.cream)
 
                     Spacer()
 
                     Text("\(Int(card.azimuthDegrees))° • \(String(format: "%.1fm", card.distanceMeters))")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandPalette.cream.opacity(0.76))
 
                     Button {
                         selectedItem = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandPalette.cream.opacity(0.76))
                     }
                 }
 
@@ -265,7 +265,7 @@ public struct ArCameraExperienceView: View {
                 if let summary = card.summary ?? card.subtitle {
                     Text(summary)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandPalette.cream.opacity(0.76))
                 }
 
                 if let detailMd = card.detailMarkdown, !detailMd.isEmpty {
@@ -278,7 +278,8 @@ public struct ArCameraExperienceView: View {
                 }
             }
             .padding(16)
-            .background(.regularMaterial)
+            .background(BrandPalette.primaryDeep.opacity(0.94))
+            .foregroundStyle(BrandPalette.cream)
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
 
@@ -290,19 +291,19 @@ public struct ArCameraExperienceView: View {
                         systemImage: "camera.Macro"
                     )
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(BrandPalette.cream)
 
                     Spacer()
 
                     Label("\(photo.likesCount)", systemImage: "heart.fill")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(BrandPalette.cream)
 
                     Button {
                         selectedItem = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandPalette.cream.opacity(0.76))
                     }
                 }
 
@@ -316,7 +317,7 @@ public struct ArCameraExperienceView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     default:
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.gray.opacity(0.25))
+                            .fill(BrandPalette.primaryDeep)
                             .frame(height: 150)
                             .overlay(ProgressView())
                     }
@@ -330,7 +331,7 @@ public struct ArCameraExperienceView: View {
                 HStack {
                     Text(photo.createdAt)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandPalette.cream.opacity(0.76))
 
                     Spacer()
 
@@ -365,14 +366,15 @@ public struct ArCameraExperienceView: View {
                         .font(.caption.weight(.bold))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.pink.opacity(0.15))
-                        .foregroundStyle(.pink)
+                        .background(BrandPalette.cream)
+                        .foregroundStyle(BrandPalette.primary)
                         .clipShape(Capsule())
                     }
                 }
             }
             .padding(16)
-            .background(.regularMaterial)
+            .background(BrandPalette.primaryDeep.opacity(0.94))
+            .foregroundStyle(BrandPalette.cream)
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
         }
@@ -401,7 +403,7 @@ public struct ArCameraExperienceView: View {
             // Compass Telemetry Badge
             HStack(spacing: 6) {
                 Image(systemName: "location.north.line.fill")
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(BrandPalette.cream)
                     .rotationEffect(.degrees(-locationManager.azimuthDegrees))
                 Text("\(Int(locationManager.azimuthDegrees))°")
                     .font(.caption.weight(.bold))
@@ -409,7 +411,7 @@ public struct ArCameraExperienceView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color.black.opacity(0.6))
+            .background(BrandPalette.primaryDeep.opacity(0.92))
             .clipShape(Capsule())
 
             Spacer()
@@ -433,14 +435,14 @@ public struct ArCameraExperienceView: View {
                 .padding(.vertical, 12)
                 .background(
                     LinearGradient(
-                        colors: [.teal, .green],
+                        colors: [BrandPalette.primary, BrandPalette.terracotta],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
-                .foregroundStyle(.white)
+                .foregroundStyle(BrandPalette.cream)
                 .clipShape(Capsule())
-                .shadow(color: .teal.opacity(0.5), radius: 8, y: 4)
+                .shadow(color: BrandPalette.primaryDeep.opacity(0.5), radius: 8, y: 4)
             }
             .disabled(!isWithinPoiZone)
             .opacity(isWithinPoiZone ? 1 : 0.5)
@@ -682,16 +684,16 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
             return renderer.image { ctx in
                 let rect = CGRect(origin: .zero, size: size)
                 let path = UIBezierPath(roundedRect: rect, cornerRadius: 28)
-                UIColor(red: 0.04, green: 0.16, blue: 0.22, alpha: 0.92).setFill()
+                UIColor(red: 0.247, green: 0.114, blue: 0.094, alpha: 0.96).setFill()
                 path.fill()
 
-                UIColor(red: 0.0, green: 0.78, blue: 0.72, alpha: 1.0).setStroke()
+                UIColor(red: 0.965, green: 0.863, blue: 0.678, alpha: 1.0).setStroke()
                 path.lineWidth = 6
                 path.stroke()
 
                 let badgeAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.boldSystemFont(ofSize: 20),
-                    .foregroundColor: UIColor(red: 0.2, green: 0.95, blue: 0.85, alpha: 1.0)
+                    .foregroundColor: UIColor(red: 0.965, green: 0.863, blue: 0.678, alpha: 1.0)
                 ]
                 let badgeText = "✦ AR STORY • \(Int(card.azimuthDegrees))°"
                 badgeText.draw(in: CGRect(x: 28, y: 24, width: 484, height: 28), withAttributes: badgeAttrs)
@@ -720,10 +722,10 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
             return renderer.image { _ in
                 let rect = CGRect(origin: .zero, size: size)
                 let outerPath = UIBezierPath(roundedRect: rect, cornerRadius: 26)
-                UIColor(white: 0.12, alpha: 0.94).setFill()
+                UIColor(red: 0.247, green: 0.114, blue: 0.094, alpha: 0.96).setFill()
                 outerPath.fill()
 
-                UIColor.systemTeal.setStroke()
+                UIColor(red: 0.604, green: 0.263, blue: 0.2, alpha: 1.0).setStroke()
                 outerPath.lineWidth = 5
                 outerPath.stroke()
 
@@ -734,7 +736,7 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
                 if let img = downloadedImage {
                     img.draw(in: imageRect)
                 } else {
-                    UIColor.darkGray.setFill()
+                    UIColor(red: 0.3, green: 0.2, blue: 0.17, alpha: 1.0).setFill()
                     UIRectFill(imageRect)
                 }
 

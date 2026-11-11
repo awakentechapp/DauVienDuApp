@@ -67,8 +67,10 @@ public struct PoiDetailSheetView: View {
                 }
                 .padding(18)
             }
+            .background(BrandPalette.paper.ignoresSafeArea())
             .navigationTitle(detail?.name ?? poiSummary.name)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(BrandPalette.paper, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -82,7 +84,8 @@ public struct PoiDetailSheetView: View {
                             .font(.caption.weight(.bold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.teal.opacity(0.15))
+                            .background(BrandPalette.cream)
+                            .foregroundStyle(BrandPalette.primary)
                             .clipShape(Capsule())
                     }
                 }
@@ -153,8 +156,8 @@ public struct PoiDetailSheetView: View {
                     .font(.caption.weight(.bold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Color.teal.opacity(0.15))
-                    .foregroundStyle(.teal)
+                    .background(BrandPalette.cream)
+                    .foregroundStyle(BrandPalette.primary)
                     .clipShape(Capsule())
 
                 Label(
@@ -180,8 +183,8 @@ public struct PoiDetailSheetView: View {
                 .font(.caption.weight(.bold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(isWithinGeofence ? Color.green.opacity(0.16) : Color.orange.opacity(0.16))
-                .foregroundStyle(isWithinGeofence ? .green : .orange)
+                .background(isWithinGeofence ? BrandPalette.cream : BrandPalette.sand)
+                .foregroundStyle(BrandPalette.primary)
                 .clipShape(Capsule())
             }
 
@@ -194,17 +197,17 @@ public struct PoiDetailSheetView: View {
     private var placeholderBanner: some View {
         ZStack {
             LinearGradient(
-                colors: [.teal.opacity(0.8), .blue.opacity(0.75)],
+                colors: [BrandPalette.terracotta, BrandPalette.primaryDeep],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             VStack(spacing: 8) {
                 Image(systemName: "building.columns.fill")
                     .font(.system(size: 40))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(BrandPalette.cream)
                 Text(detail?.name ?? poiSummary.name)
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(BrandPalette.cream)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)
             }
@@ -232,8 +235,8 @@ public struct PoiDetailSheetView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(isWithinGeofence ? Color.green : Color.gray.opacity(0.4))
-                    .foregroundStyle(.white)
+                    .background(isWithinGeofence ? BrandPalette.primary : BrandPalette.mutedText.opacity(0.45))
+                    .foregroundStyle(BrandPalette.cream)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
                 .disabled(!isWithinGeofence)
@@ -252,8 +255,8 @@ public struct PoiDetailSheetView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(isWithinGeofence ? Color.teal : Color.gray.opacity(0.4))
-                    .foregroundStyle(.white)
+                    .background(isWithinGeofence ? BrandPalette.terracotta : BrandPalette.mutedText.opacity(0.45))
+                    .foregroundStyle(BrandPalette.cream)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
                 .disabled(!isWithinGeofence)
@@ -262,7 +265,7 @@ public struct PoiDetailSheetView: View {
             if !isWithinGeofence {
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BrandPalette.terracotta)
                     Text(
                         appState.selectedLanguage == .vi
                             ? "Hãy di chuyển lại gần điểm tham quan (trong phạm vi \(Int(poiSummary.activationRadiusMeters + 20))m) để mở khóa Camera AR và chụp ảnh lưu niệm tại chỗ."
@@ -287,7 +290,7 @@ public struct PoiDetailSheetView: View {
                     systemImage: "book.closed.fill"
                 )
                 .font(.headline)
-                .foregroundStyle(.teal)
+                .foregroundStyle(BrandPalette.primary)
 
                 Spacer()
 
@@ -315,7 +318,7 @@ public struct PoiDetailSheetView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(BrandPalette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -335,12 +338,13 @@ public struct PoiDetailSheetView: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 2) {
                         Image(systemName: "safari.fill")
-                            .foregroundStyle(.teal)
+                            .foregroundStyle(BrandPalette.primary)
                         Text("\(Int(card.azimuthDegrees))°")
                             .font(.caption2.weight(.bold))
                     }
                     .frame(width: 44, height: 44)
-                    .background(Color.teal.opacity(0.12))
+                    .background(BrandPalette.cream)
+                    .foregroundStyle(BrandPalette.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -404,21 +408,69 @@ public struct PoiDetailSheetView: View {
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 12)
             } else {
-                ForEach(communityPhotos) { photo in
-                    CommunityPhotoCardView(
-                        photo: photo,
-                        currentUserId: appState.currentUser?.id,
-                        language: appState.selectedLanguage,
-                        onToggleLike: {
-                            Task { await handleToggleLike(photo) }
-                        },
-                        onReport: {
-                            reportingPhoto = photo
-                        },
-                        onDeleteOwn: {
-                            Task { await handleDeletePhoto(photo) }
+                let featured = Array(communityPhotos.prefix(3))
+                if let first = featured.first {
+                    if featured.count == 1 {
+                        CommunityPhotoMosaicTileView(
+                            photo: first,
+                            currentUserId: appState.currentUser?.id,
+                            language: appState.selectedLanguage,
+                            height: 237,
+                            onToggleLike: { Task { await handleToggleLike(first) } },
+                            onReport: { reportingPhoto = first },
+                            onDeleteOwn: { Task { await handleDeletePhoto(first) } }
+                        )
+                    } else {
+                        GeometryReader { geometry in
+                            HStack(alignment: .top, spacing: 9) {
+                                CommunityPhotoMosaicTileView(
+                                    photo: first,
+                                    currentUserId: appState.currentUser?.id,
+                                    language: appState.selectedLanguage,
+                                    height: 237,
+                                    onToggleLike: { Task { await handleToggleLike(first) } },
+                                    onReport: { reportingPhoto = first },
+                                    onDeleteOwn: { Task { await handleDeletePhoto(first) } }
+                                )
+                                .frame(width: (geometry.size.width - 9) * 0.62)
+
+                                VStack(spacing: 9) {
+                                    ForEach(Array(featured.dropFirst().prefix(2))) { photo in
+                                        CommunityPhotoMosaicTileView(
+                                            photo: photo,
+                                            currentUserId: appState.currentUser?.id,
+                                            language: appState.selectedLanguage,
+                                            height: featured.count == 2 ? 237 : 114,
+                                            onToggleLike: { Task { await handleToggleLike(photo) } },
+                                            onReport: { reportingPhoto = photo },
+                                            onDeleteOwn: { Task { await handleDeletePhoto(photo) } }
+                                        )
+                                    }
+                                }
+                                .frame(width: (geometry.size.width - 9) * 0.38)
+                            }
                         }
-                    )
+                        .frame(height: 237)
+                    }
+                }
+
+                if communityPhotos.count > 3 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 9) {
+                            ForEach(Array(communityPhotos.dropFirst(3))) { photo in
+                                CommunityPhotoMosaicTileView(
+                                    photo: photo,
+                                    currentUserId: appState.currentUser?.id,
+                                    language: appState.selectedLanguage,
+                                    height: 178,
+                                    onToggleLike: { Task { await handleToggleLike(photo) } },
+                                    onReport: { reportingPhoto = photo },
+                                    onDeleteOwn: { Task { await handleDeletePhoto(photo) } }
+                                )
+                                .frame(width: 158)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -556,6 +608,98 @@ public struct PoiDetailSheetView: View {
     }
 }
 
+// MARK: - Community Photo Mosaic Tile
+
+private struct CommunityPhotoMosaicTileView: View {
+    let photo: CommunityPhotoDto
+    let currentUserId: String?
+    let language: AppLanguage
+    let height: CGFloat
+    let onToggleLike: () -> Void
+    let onReport: () -> Void
+    let onDeleteOwn: () -> Void
+
+    private var isOwnPhoto: Bool { currentUserId == photo.userId }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            AsyncImage(url: URL(string: photo.imageUrl)) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    BrandPalette.sand
+                        .overlay(Image(systemName: "photo").font(.title2).foregroundStyle(BrandPalette.primary.opacity(0.6)))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .clipped()
+
+            LinearGradient(
+                colors: [.clear, BrandPalette.primaryDeep.opacity(0.82)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Spacer()
+                    Menu {
+                        if isOwnPhoto {
+                            Button(role: .destructive, action: onDeleteOwn) {
+                                Label(language == .vi ? "Xóa ảnh" : "Delete photo", systemImage: "trash")
+                            }
+                        } else {
+                            Button(action: onReport) {
+                                Label(language == .vi ? "Báo cáo ảnh" : "Report photo", systemImage: "flag")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(.black.opacity(0.42), in: Circle())
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Text(photo.authorDisplayName)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let caption = photo.caption, !caption.isEmpty {
+                    Text(caption)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                }
+                HStack(spacing: 8) {
+                    Button(action: onToggleLike) {
+                        Label("\(photo.likesCount)", systemImage: (photo.isLikedByCurrentUser ?? false) ? "heart.fill" : "heart")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(BrandPalette.primaryDeep)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(BrandPalette.cream, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    if let azimuth = photo.azimuthDegrees {
+                        Label("\(Int(azimuth))°", systemImage: "safari")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+            }
+            .padding(10)
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(BrandPalette.cream.opacity(0.65), lineWidth: 1))
+    }
+}
+
 // MARK: - Single Community Photo Card
 
 private struct CommunityPhotoCardView: View {
@@ -571,7 +715,7 @@ private struct CommunityPhotoCardView: View {
             HStack {
                 Image(systemName: "person.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(BrandPalette.primary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(photo.authorDisplayName)
                         .font(.subheadline.weight(.semibold))
@@ -599,7 +743,7 @@ private struct CommunityPhotoCardView: View {
                 default:
                     ZStack {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.gray.opacity(0.15))
+                            .fill(BrandPalette.sand)
                             .frame(height: 180)
                         Image(systemName: "photo")
                             .font(.largeTitle)
@@ -617,7 +761,7 @@ private struct CommunityPhotoCardView: View {
                 Button(action: onToggleLike) {
                     HStack(spacing: 5) {
                         Image(systemName: (photo.isLikedByCurrentUser ?? false) ? "heart.fill" : "heart")
-                            .foregroundStyle(.pink)
+                            .foregroundStyle(BrandPalette.terracotta)
                         Text("\(photo.likesCount)")
                             .font(.caption.weight(.bold))
                     }
