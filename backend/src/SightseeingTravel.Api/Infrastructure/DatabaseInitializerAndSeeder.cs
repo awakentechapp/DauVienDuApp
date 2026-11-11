@@ -76,6 +76,16 @@ public static class DatabaseInitializerAndSeeder
             await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
         }
 
+        var passwordResetMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0006_IdentityPasswordReset.sql")
+            ?? throw new InvalidOperationException("Identity password reset migration resource is missing.");
+        await using (passwordResetMigration)
+        using (var reader = new StreamReader(passwordResetMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await identityDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users

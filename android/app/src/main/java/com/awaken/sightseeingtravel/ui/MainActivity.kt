@@ -46,6 +46,7 @@ import com.awaken.sightseeingtravel.core.model.*
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.admin.AdminApprovalAndModerationScreen
+import com.awaken.sightseeingtravel.ui.admin.SuperAdminAccountManagementScreen
 import com.awaken.sightseeingtravel.ui.admin.ArModelLibraryDialog
 import com.awaken.sightseeingtravel.ui.ar.ArCameraScreen
 import com.awaken.sightseeingtravel.ui.ar.ArSelfieCaptureScreen
@@ -55,7 +56,8 @@ private enum class AppDestination {
     MAIN_TABS,
     AR_CAMERA,
     AR_SELFIE_CAMERA,
-    ADMIN_CONSOLE
+    ADMIN_CONSOLE,
+    ACCOUNT_MANAGEMENT
 }
 
 /**
@@ -147,6 +149,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
     val spatialPose by viewModel.spatialPose.collectAsState()
 
     var currentDestination by remember { mutableStateOf(AppDestination.MAIN_TABS) }
+    var accountManagementInitialRole by remember { mutableStateOf("Admin") }
     var selectedTab by remember { mutableStateOf(MainBottomTab.EXPLORE) }
     var initialPlacesCategory by remember { mutableStateOf("ALL") }
     var recenterTrigger by remember { mutableIntStateOf(0) }
@@ -199,11 +202,16 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
             selectedLanguage = uiState.selectedLanguage,
             isLoading = uiState.isLoading,
             errorMessage = uiState.errorMessage,
+            noticeMessage = uiState.statusBannerMessage,
             onLanguageChange = viewModel::setLanguage,
             onClearError = viewModel::clearBannerMessages,
             onLogin = { email, password -> viewModel.login(email, password) },
             onRegister = { email, password, name ->
                 viewModel.register(email, password, name, uiState.selectedLanguage)
+            },
+            onRequestPasswordReset = viewModel::requestPasswordReset,
+            onConfirmPasswordReset = { email, code, password, onSuccess ->
+                viewModel.confirmPasswordReset(email, code, password, onSuccess)
             }
         )
     } else {
@@ -301,6 +309,18 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
             )
         }
 
+        AppDestination.ACCOUNT_MANAGEMENT -> {
+            SuperAdminAccountManagementScreen(
+                currentUser = uiState.currentUser,
+                selectedLanguage = uiState.selectedLanguage,
+                initialRole = accountManagementInitialRole,
+                onLoadUsers = viewModel::loadManagedAccounts,
+                onCreateUser = viewModel::createManagedAccount,
+                onSetUserActive = viewModel::setManagedAccountActive,
+                onBack = { currentDestination = AppDestination.MAIN_TABS }
+            )
+        }
+
         AppDestination.MAIN_TABS -> {
             Scaffold(
                 bottomBar = {
@@ -351,7 +371,6 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                 onToggleLanguage = {
                                     viewModel.setLanguage(if (isEn) "vi" else "en")
                                 },
-                                onOpenAccountModal = { showAuthModal = true },
                                 onOpenAdminConsole = {
                                     viewModel.loadAdminConsoleData()
                                     currentDestination = AppDestination.ADMIN_CONSOLE
@@ -426,6 +445,10 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                 onOpenAdminConsole = {
                                     viewModel.loadAdminConsoleData()
                                     currentDestination = AppDestination.ADMIN_CONSOLE
+                                },
+                                onOpenAccountManagement = { role ->
+                                    accountManagementInitialRole = role
+                                    currentDestination = AppDestination.ACCOUNT_MANAGEMENT
                                 },
                                 onLoadArModelLibrary = viewModel::loadAdminArModelLibrary,
                                 onLogout = { viewModel.logout() }
@@ -580,7 +603,6 @@ private fun HomeTabScreen(
     uiState: SightseeingUiState,
     spatialPose: DeviceSpatialPose,
     onToggleLanguage: () -> Unit,
-    onOpenAccountModal: () -> Unit,
     onOpenAdminConsole: () -> Unit,
     onNavigateToExploreMap: (String?) -> Unit,
     onNavigateToPlacesTab: (String) -> Unit,
@@ -639,14 +661,6 @@ private fun HomeTabScreen(
                         Text(if (isEn) "EN" else "VI", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
-                    IconButton(
-                        onClick = onOpenAccountModal,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(BrandColors.Sand, CircleShape)
-                    ) {
-                        Icon(Icons.Default.Person, contentDescription = if (isEn) "Account" else "Tài khoản", tint = BrandColors.Primary)
-                    }
                 }
             }
 
@@ -1780,6 +1794,7 @@ private fun InfoAndProfileTabScreen(
     onSetLanguage: (String) -> Unit,
     onOpenAccountModal: () -> Unit,
     onOpenAdminConsole: () -> Unit,
+    onOpenAccountManagement: (String) -> Unit,
     onLoadArModelLibrary: suspend () -> List<ArModelLibraryItemDto>,
     onLogout: () -> Unit
 ) {
@@ -1926,6 +1941,43 @@ private fun InfoAndProfileTabScreen(
                         Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(if (isEn) "Open Governance Console" else "Mở Bảng Quản Trị & Kiểm Duyệt")
+                    }
+                }
+            }
+
+            if (user.isSuperAdmin) {
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (isEn) "Account management" else "Quản lý tài khoản",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 16.sp,
+                            color = BrandColors.PrimaryDeep
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { onOpenAccountManagement("Admin") },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(if (isEn) "Admins" else "Tài khoản Admin", maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = { onOpenAccountManagement("Tourist") },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(if (isEn) "Tourists" else "Tài khoản Tourist", maxLines = 1)
+                            }
+                        }
                     }
                 }
             }

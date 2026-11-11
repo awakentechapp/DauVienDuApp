@@ -12,6 +12,15 @@ public sealed record LoginRequest(
     string Email,
     string Password);
 
+public sealed record ForgotPasswordRequest(string Email);
+
+public sealed record ResetPasswordRequest(
+    string Email,
+    string Code,
+    string NewPassword);
+
+public sealed record PasswordResetMessageResponse(string Message);
+
 public sealed record RefreshTokenRequest(
     string RefreshToken);
 

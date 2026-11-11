@@ -29,6 +29,7 @@ public static class IdentityModuleExtensions
 
         services.AddSingleton<PasswordHasher>();
         services.AddSingleton<JwtTokenGenerator>();
+        services.AddSingleton<IPasswordResetEmailSender, SmtpPasswordResetEmailSender>();
         services.AddScoped<IIdentityService, IdentityService>();
 
         return services;

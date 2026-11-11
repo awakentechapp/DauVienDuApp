@@ -64,7 +64,9 @@ import com.awaken.sightseeingtravel.R
 private enum class AuthPage {
     WELCOME,
     SIGN_IN,
-    REGISTER
+    REGISTER,
+    FORGOT_PASSWORD,
+    RESET_PASSWORD
 }
 
 private object AuthPalette {
@@ -83,13 +85,17 @@ internal fun AuthScreen(
     onLanguageChange: (String) -> Unit,
     onClearError: () -> Unit,
     onLogin: (email: String, password: String) -> Unit,
-    onRegister: (email: String, password: String, displayName: String) -> Unit
+    onRegister: (email: String, password: String, displayName: String) -> Unit,
+    onRequestPasswordReset: (email: String) -> Unit,
+    onConfirmPasswordReset: (email: String, code: String, newPassword: String, onSuccess: () -> Unit) -> Unit,
+    noticeMessage: String? = null
 ) {
     var page by rememberSaveable { mutableStateOf(AuthPage.WELCOME) }
     var displayName by rememberSaveable { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
+    var resetCode by rememberSaveable { mutableStateOf("") }
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var confirmPasswordVisible by rememberSaveable { mutableStateOf(false) }
     var localError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -101,6 +107,9 @@ internal fun AuthScreen(
         AuthPage.WELCOME -> false
         AuthPage.SIGN_IN -> emailIsValid && password.isNotBlank()
         AuthPage.REGISTER -> emailIsValid && displayName.isNotBlank() &&
+            password.length >= 8 && password == confirmPassword
+        AuthPage.FORGOT_PASSWORD -> emailIsValid
+        AuthPage.RESET_PASSWORD -> emailIsValid && resetCode.length == 8 &&
             password.length >= 8 && password == confirmPassword
     }
 
@@ -258,10 +267,25 @@ internal fun AuthScreen(
                     isLoading = isLoading,
                     canSubmit = canSubmit,
                     errorMessage = localError ?: errorMessage,
+                    noticeMessage = noticeMessage,
+                    resetCode = resetCode,
+                    onResetCodeChange = { resetCode = it.filter(Char::isDigit).take(8) },
+                    onForgotPassword = {
+                        page = AuthPage.FORGOT_PASSWORD
+                        resetCode = ""
+                        localError = null
+                        onClearError()
+                    },
+                    onResendResetCode = { onRequestPasswordReset(trimmedEmail) },
                     onBack = {
-                        page = AuthPage.WELCOME
+                        page = if (page == AuthPage.FORGOT_PASSWORD || page == AuthPage.RESET_PASSWORD) {
+                            AuthPage.SIGN_IN
+                        } else {
+                            AuthPage.WELCOME
+                        }
                         password = ""
                         confirmPassword = ""
+                        resetCode = ""
                         passwordVisible = false
                         confirmPasswordVisible = false
                         localError = null
@@ -271,22 +295,46 @@ internal fun AuthScreen(
                         page = if (page == AuthPage.SIGN_IN) AuthPage.REGISTER else AuthPage.SIGN_IN
                         password = ""
                         confirmPassword = ""
+                        resetCode = ""
                         passwordVisible = false
                         confirmPasswordVisible = false
                         localError = null
                         onClearError()
                     },
                     onSubmit = {
-                        if (page == AuthPage.REGISTER) {
-                            if (password != confirmPassword) {
-                                localError = if (isEn) "Passwords do not match." else "Mật khẩu xác nhận chưa khớp."
-                            } else {
-                                localError = null
-                                onRegister(trimmedEmail, password, displayName.trim())
+                        when (page) {
+                            AuthPage.REGISTER -> {
+                                if (password != confirmPassword) {
+                                    localError = if (isEn) "Passwords do not match." else "Mật khẩu xác nhận chưa khớp."
+                                } else {
+                                    localError = null
+                                    onRegister(trimmedEmail, password, displayName.trim())
+                                }
                             }
-                        } else {
-                            localError = null
-                            onLogin(trimmedEmail, password)
+                            AuthPage.SIGN_IN -> {
+                                localError = null
+                                onLogin(trimmedEmail, password)
+                            }
+                            AuthPage.FORGOT_PASSWORD -> {
+                                localError = null
+                                onClearError()
+                                page = AuthPage.RESET_PASSWORD
+                                onRequestPasswordReset(trimmedEmail)
+                            }
+                            AuthPage.RESET_PASSWORD -> {
+                                if (password != confirmPassword) {
+                                    localError = if (isEn) "Passwords do not match." else "Mật khẩu xác nhận chưa khớp."
+                                } else {
+                                    localError = null
+                                    onConfirmPasswordReset(trimmedEmail, resetCode, password) {
+                                        page = AuthPage.SIGN_IN
+                                        password = ""
+                                        confirmPassword = ""
+                                        resetCode = ""
+                                    }
+                                }
+                            }
+                            AuthPage.WELCOME -> Unit
                         }
                     }
                 )
@@ -333,11 +381,20 @@ private fun AuthForm(
     isLoading: Boolean,
     canSubmit: Boolean,
     errorMessage: String?,
+    noticeMessage: String?,
+    resetCode: String,
+    onResetCodeChange: (String) -> Unit,
+    onForgotPassword: () -> Unit,
+    onResendResetCode: () -> Unit,
     onBack: () -> Unit,
     onSwitchPage: () -> Unit,
     onSubmit: () -> Unit
 ) {
     val isRegister = page == AuthPage.REGISTER
+    val isSignIn = page == AuthPage.SIGN_IN
+    val isForgotPassword = page == AuthPage.FORGOT_PASSWORD
+    val isResetPassword = page == AuthPage.RESET_PASSWORD
+    val isResetFlow = isForgotPassword || isResetPassword
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -346,24 +403,49 @@ private fun AuthForm(
         TextButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = AuthPalette.brick)
             Spacer(Modifier.size(6.dp))
-            Text(if (isEn) "Back" else "Quay lại", color = AuthPalette.brick)
+            Text(
+                if (isResetFlow) {
+                    if (isEn) "Back to sign in" else "Quay lại đăng nhập"
+                } else {
+                    if (isEn) "Back" else "Quay lại"
+                },
+                color = AuthPalette.brick
+            )
+        }
+
+        if (isSignIn) {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = AuthPalette.paper,
+                    shadowElevation = 5.dp
+                ) {
+                    androidx.compose.foundation.Image(
+                        painter = painterResource(id = R.drawable.logo_doc_do_gach),
+                        contentDescription = if (isEn) "Dau Vien Du logo" else "Logo Dấu Viễn Du",
+                        modifier = Modifier.size(132.dp).padding(8.dp)
+                    )
+                }
+            }
         }
 
         Text(
-            text = if (isRegister) {
-                if (isEn) "Create your account" else "Tạo tài khoản mới"
-            } else {
-                if (isEn) "Welcome back" else "Chào mừng bạn trở lại"
+            text = when {
+                isRegister -> if (isEn) "Create your account" else "Tạo tài khoản mới"
+                isForgotPassword -> if (isEn) "Forgot password?" else "Quên mật khẩu?"
+                isResetPassword -> if (isEn) "Reset your password" else "Đặt lại mật khẩu"
+                else -> if (isEn) "Welcome back" else "Chào mừng bạn trở lại"
             },
             style = MaterialTheme.typography.headlineSmall,
             color = AuthPalette.ink,
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = if (isRegister) {
-                if (isEn) "Join Dấu Viễn Du and keep your journeys close." else "Tham gia Dấu Viễn Du để lưu lại những hành trình đáng nhớ."
-            } else {
-                if (isEn) "Sign in to continue exploring." else "Đăng nhập để tiếp tục khám phá."
+            text = when {
+                isRegister -> if (isEn) "Join Dấu Viễn Du and keep your journeys close." else "Tham gia Dấu Viễn Du để lưu lại những hành trình đáng nhớ."
+                isForgotPassword -> if (isEn) "Enter your email and we’ll send a one-time reset code." else "Nhập email để nhận mã xác minh đặt lại mật khẩu."
+                isResetPassword -> if (isEn) "Enter the 8-digit code from your email and choose a new password." else "Nhập mã 8 chữ số trong email và chọn mật khẩu mới."
+                else -> if (isEn) "Sign in to continue exploring." else "Đăng nhập để tiếp tục khám phá."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = AuthPalette.muted
@@ -391,41 +473,72 @@ private fun AuthForm(
                     )
                 }
 
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = onEmailChange,
-                    label = { Text("Email") },
-                    placeholder = { Text("ban@example.com") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (!isResetPassword) {
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = onEmailChange,
+                        label = { Text("Email") },
+                        placeholder = { Text("ban@example.com") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = {},
+                        label = { Text("Email") },
+                        singleLine = true,
+                        enabled = false,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = resetCode,
+                        onValueChange = onResetCodeChange,
+                        label = { Text(if (isEn) "8-digit reset code" else "Mã đặt lại gồm 8 số") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = onPasswordChange,
-                    label = { Text(if (isEn) "Password" else "Mật khẩu") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = onTogglePassword) {
-                            Icon(
-                                imageVector = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (passwordVisible) {
-                                    if (isEn) "Hide password" else "Ẩn mật khẩu"
-                                } else {
-                                    if (isEn) "Show password" else "Hiện mật khẩu"
+                if (!isForgotPassword) {
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = onPasswordChange,
+                        label = {
+                            Text(
+                                when {
+                                    isRegister -> if (isEn) "Password" else "Mật khẩu"
+                                    isResetPassword -> if (isEn) "New password" else "Mật khẩu mới"
+                                    else -> if (isEn) "Password" else "Mật khẩu"
                                 }
                             )
-                        }
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = onTogglePassword) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = if (passwordVisible) {
+                                        if (isEn) "Hide password" else "Ẩn mật khẩu"
+                                    } else {
+                                        if (isEn) "Show password" else "Hiện mật khẩu"
+                                    }
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
-                if (isRegister) {
+                if (isRegister || isResetPassword) {
                     Text(
                         text = if (isEn) "Use at least 8 characters." else "Mật khẩu cần ít nhất 8 ký tự.",
                         style = MaterialTheme.typography.labelSmall,
@@ -434,7 +547,15 @@ private fun AuthForm(
                     OutlinedTextField(
                         value = confirmPassword,
                         onValueChange = onConfirmPasswordChange,
-                        label = { Text(if (isEn) "Confirm password" else "Xác nhận mật khẩu") },
+                        label = {
+                            Text(
+                                if (isResetPassword) {
+                                    if (isEn) "Confirm new password" else "Xác nhận mật khẩu mới"
+                                } else {
+                                    if (isEn) "Confirm password" else "Xác nhận mật khẩu"
+                                }
+                            )
+                        },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
@@ -458,6 +579,33 @@ private fun AuthForm(
                             text = if (isEn) "Passwords do not match yet." else "Mật khẩu xác nhận chưa khớp.",
                             style = MaterialTheme.typography.labelSmall,
                             color = AuthPalette.brick
+                        )
+                    }
+                }
+
+                if (isSignIn) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onForgotPassword) {
+                            Text(
+                                if (isEn) "Forgot password?" else "Quên mật khẩu?",
+                                color = AuthPalette.teal,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                if (!noticeMessage.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = BrandColors.Cream,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = noticeMessage,
+                            color = AuthPalette.brick,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp)
                         )
                     }
                 }
@@ -487,13 +635,24 @@ private fun AuthForm(
                     Text(
                         text = if (isLoading) {
                             if (isEn) "Please wait…" else "Đang xử lý…"
-                        } else if (isRegister) {
-                            if (isEn) "Create account" else "Tạo tài khoản"
-                        } else {
-                            if (isEn) "Sign in" else "Đăng nhập"
+                        } else when {
+                            isRegister -> if (isEn) "Create account" else "Tạo tài khoản"
+                            isForgotPassword -> if (isEn) "Send reset code" else "Gửi mã đặt lại"
+                            isResetPassword -> if (isEn) "Reset password" else "Đặt lại mật khẩu"
+                            else -> if (isEn) "Sign in" else "Đăng nhập"
                         },
                         fontWeight = FontWeight.SemiBold
                     )
+                }
+
+                if (isResetPassword) {
+                    TextButton(
+                        onClick = onResendResetCode,
+                        enabled = email.isNotBlank() && !isLoading,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text(if (isEn) "Resend code" else "Gửi lại mã", color = AuthPalette.teal)
+                    }
                 }
 
                 Row(
@@ -502,20 +661,20 @@ private fun AuthForm(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isRegister) {
-                            if (isEn) "Already have an account?" else "Đã có tài khoản?"
-                        } else {
-                            if (isEn) "New to Dấu Viễn Du?" else "Chưa có tài khoản?"
+                        text = when {
+                            isResetFlow -> if (isEn) "Return to sign in" else "Quay lại đăng nhập"
+                            isRegister -> if (isEn) "Already have an account?" else "Đã có tài khoản?"
+                            else -> if (isEn) "New to Dấu Viễn Du?" else "Chưa có tài khoản?"
                         },
                         color = AuthPalette.muted,
                         style = MaterialTheme.typography.bodySmall
                     )
-                    TextButton(onClick = onSwitchPage) {
+                    TextButton(onClick = if (isResetFlow) onBack else onSwitchPage) {
                         Text(
-                            text = if (isRegister) {
-                                if (isEn) "Sign in" else "Đăng nhập"
-                            } else {
-                                if (isEn) "Create one" else "Đăng ký"
+                            text = when {
+                                isResetFlow -> if (isEn) "Sign in" else "Đăng nhập"
+                                isRegister -> if (isEn) "Sign in" else "Đăng nhập"
+                                else -> if (isEn) "Create one" else "Đăng ký"
                             },
                             color = AuthPalette.teal,
                             fontWeight = FontWeight.Bold

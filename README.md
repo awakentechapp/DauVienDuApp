@@ -55,7 +55,7 @@ DauVienDuApp/
    ```bash
    cp .env.example .env
    ```
-2. Cấu hình `.env` cho database/user PostgreSQL `awkdvd` đã tạo trong FlashPanel, gồm mật khẩu database, `JWT_SIGNING_KEY`, email SuperAdmin khởi tạo và mật khẩu bootstrap. Tạo `JWT_SIGNING_KEY` ngẫu nhiên tối thiểu 32 byte, ví dụ bằng `openssl rand -hex 32`. Điền thông tin **Contabo Object Storage** (`CONTABO_S3_SERVICE_URL`, `CONTABO_S3_BUCKET_NAME`, `CONTABO_S3_PUBLIC_BASE_URL`, `CONTABO_S3_KEY_PREFIX`, `CONTABO_S3_ACCESS_KEY`, `CONTABO_S3_SECRET_KEY`) nếu bật upload ảnh. Mặc định `CONTABO_S3_KEY_PREFIX=dauviendu_cloud`; mọi ảnh được upload qua app sẽ nằm dưới prefix này trong bucket.
+2. Cấu hình `.env` cho database/user PostgreSQL `awkdvd` đã tạo trong FlashPanel, gồm mật khẩu database, `JWT_SIGNING_KEY`, email SuperAdmin khởi tạo và mật khẩu bootstrap. Tạo `JWT_SIGNING_KEY` ngẫu nhiên tối thiểu 32 byte, ví dụ bằng `openssl rand -hex 32`. Điền thông tin **Contabo Object Storage** (`CONTABO_S3_SERVICE_URL`, `CONTABO_S3_BUCKET_NAME`, `CONTABO_S3_PUBLIC_BASE_URL`, `CONTABO_S3_KEY_PREFIX`, `CONTABO_S3_ACCESS_KEY`, `CONTABO_S3_SECRET_KEY`) nếu bật upload ảnh. Mặc định `CONTABO_S3_KEY_PREFIX=dauviendu_cloud`; mọi ảnh được upload qua app sẽ nằm dưới prefix này trong bucket. Để gửi mã Quên mật khẩu, cấu hình thêm SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, `SMTP_ENABLE_SSL`).
    Bucket không cần bật Public Access: API upload object không gắn ACL công khai và trả URL GET ký số có hiệu lực 15 phút. URL ký số là bearer link trong thời gian này; chỉ người có URL mới đọc được object.
 3. Khởi chạy bằng Docker Compose:
    ```bash

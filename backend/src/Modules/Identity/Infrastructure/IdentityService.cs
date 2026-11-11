@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 using SightseeingTravel.Modules.Identity.Application;
 using SightseeingTravel.Modules.Identity.Domain;
 using SightseeingTravel.SharedKernel.Abstractions;
@@ -16,19 +18,22 @@ public sealed class IdentityService : IIdentityService
     private readonly JwtTokenGenerator _jwtTokenGenerator;
     private readonly ICurrentUser _currentUser;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IPasswordResetEmailSender _passwordResetEmailSender;
 
     public IdentityService(
         IdentityDbContext dbContext,
         PasswordHasher passwordHasher,
         JwtTokenGenerator jwtTokenGenerator,
         ICurrentUser currentUser,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IPasswordResetEmailSender passwordResetEmailSender)
     {
         _dbContext = dbContext;
         _passwordHasher = passwordHasher;
         _jwtTokenGenerator = jwtTokenGenerator;
         _currentUser = currentUser;
         _dateTimeProvider = dateTimeProvider;
+        _passwordResetEmailSender = passwordResetEmailSender;
     }
 
     public async Task<Result<AuthTokenResponse>> RegisterTouristAsync(
@@ -102,6 +107,101 @@ public sealed class IdentityService : IIdentityService
         await _dbContext.SaveChangesAsync(ct);
 
         return Result.Success(response);
+    }
+
+    public async Task<Result> RequestPasswordResetAsync(string email, CancellationToken ct = default)
+    {
+        if (!_passwordResetEmailSender.IsConfigured)
+        {
+            return Result.Failure(new Error(
+                "PASSWORD_RESET_UNAVAILABLE",
+                "Password reset email delivery is not configured on the server.",
+                ErrorType.ServiceUnavailable));
+        }
+
+        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+            return Result.Success();
+
+        var normalizedEmail = User.NormalizeEmail(email);
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, ct);
+        if (user is null)
+            return Result.Success();
+
+        var now = _dateTimeProvider.UtcNow;
+        if (user.PasswordResetRequestedAt is { } lastRequest && now - lastRequest < TimeSpan.FromMinutes(1))
+            return Result.Success();
+
+        var code = RandomNumberGenerator.GetInt32(0, 100_000_000).ToString("D8");
+        var codeHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(code)));
+        user.SetPasswordResetCode(codeHash, now.AddMinutes(15), now);
+        await _dbContext.SaveChangesAsync(ct);
+
+        try
+        {
+            await _passwordResetEmailSender.SendResetCodeAsync(
+                user.Email,
+                user.DisplayName,
+                code,
+                user.PreferredLanguage,
+                ct);
+        }
+        catch
+        {
+            user.ClearPasswordResetCode();
+            await _dbContext.SaveChangesAsync(ct);
+            // Keep the public response identical for valid and unknown addresses.
+            // The email sender records the transport failure for server-side diagnosis.
+            return Result.Success();
+        }
+
+        return Result.Success();
+    }
+
+    public async Task<Result> ConfirmPasswordResetAsync(ResetPasswordRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < MinPasswordLength)
+        {
+            return Result.Failure(new Error(
+                "VALIDATION_ERROR",
+                $"The new password must contain at least {MinPasswordLength} characters.",
+                ErrorType.Validation));
+        }
+
+        var now = _dateTimeProvider.UtcNow;
+        var invalidCode = Result.Failure(new Error(
+            "PASSWORD_RESET_CODE_INVALID",
+            "The reset code is invalid, expired, or has reached the attempt limit.",
+            ErrorType.Unauthorized));
+
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return invalidCode;
+
+        var normalizedEmail = User.NormalizeEmail(request.Email);
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail, ct);
+
+        if (user is null
+            || !user.IsActive
+            || string.IsNullOrWhiteSpace(request.Code)
+            || request.Code.Length != 8
+            || request.Code.Any(character => !char.IsDigit(character))
+            || !user.VerifyPasswordResetCode(
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Code))),
+                now))
+        {
+            if (user is not null)
+                await _dbContext.SaveChangesAsync(ct);
+            return invalidCode;
+        }
+
+        user.ChangePassword(_passwordHasher.HashPassword(request.NewPassword), now);
+        var activeTokens = await _dbContext.RefreshTokens
+            .Where(refreshToken => refreshToken.UserId == user.Id && refreshToken.RevokedAt == null)
+            .ToListAsync(ct);
+        foreach (var token in activeTokens)
+            token.Revoke(now);
+
+        await _dbContext.SaveChangesAsync(ct);
+        return Result.Success();
     }
 
     public async Task<Result<AuthTokenResponse>> RefreshTokenAsync(
@@ -329,6 +429,14 @@ public sealed class IdentityService : IIdentityService
             return Result.Failure<UserProfileDto>(new Error(
                 "VALIDATION_ERROR",
                 "Specified user role is invalid.",
+                ErrorType.Validation));
+        }
+
+        if (request.Role is not UserRole.Tourist and not UserRole.Admin)
+        {
+            return Result.Failure<UserProfileDto>(new Error(
+                "VALIDATION_ERROR",
+                "SuperAdmin accounts cannot be created from this account management endpoint.",
                 ErrorType.Validation));
         }
 

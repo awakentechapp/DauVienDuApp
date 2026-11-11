@@ -40,6 +40,33 @@ public static class IdentityEndpoints
         .AllowAnonymous()
         .WithName("Login");
 
+        group.MapPost("/auth/password-reset/request", async (
+            ForgotPasswordRequest request,
+            IIdentityService identityService,
+            CancellationToken ct) =>
+        {
+            var result = await identityService.RequestPasswordResetAsync(request.Email, ct);
+            return result.IsSuccess
+                ? Results.Ok(new PasswordResetMessageResponse(
+                    "If the email belongs to an active account, reset instructions will be sent when email delivery is available."))
+                : ToErrorResult(result.Error);
+        })
+        .AllowAnonymous()
+        .WithName("RequestPasswordReset");
+
+        group.MapPost("/auth/password-reset/confirm", async (
+            ResetPasswordRequest request,
+            IIdentityService identityService,
+            CancellationToken ct) =>
+        {
+            var result = await identityService.ConfirmPasswordResetAsync(request, ct);
+            return result.IsSuccess
+                ? Results.Ok(new PasswordResetMessageResponse("Password reset successfully. You can sign in now."))
+                : ToErrorResult(result.Error);
+        })
+        .AllowAnonymous()
+        .WithName("ConfirmPasswordReset");
+
         group.MapPost("/auth/refresh", async (
             RefreshTokenRequest request,
             IIdentityService identityService,

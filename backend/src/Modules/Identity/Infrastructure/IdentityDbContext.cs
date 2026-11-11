@@ -65,6 +65,20 @@ public sealed class IdentityDbContext : DbContext
                 .HasColumnName("is_active")
                 .IsRequired();
 
+            builder.Property(u => u.PasswordResetCodeHash)
+                .HasColumnName("password_reset_code_hash")
+                .HasMaxLength(64);
+
+            builder.Property(u => u.PasswordResetExpiresAt)
+                .HasColumnName("password_reset_expires_at");
+
+            builder.Property(u => u.PasswordResetRequestedAt)
+                .HasColumnName("password_reset_requested_at");
+
+            builder.Property(u => u.PasswordResetAttempts)
+                .HasColumnName("password_reset_attempts")
+                .IsRequired();
+
             builder.Property(u => u.CreatedAt)
                 .HasColumnName("created_at")
                 .IsRequired();

@@ -8,6 +8,7 @@ public enum ErrorType
     NotFound = 404,
     Conflict = 409,
     UnprocessableEntity = 422,
+    ServiceUnavailable = 503,
     Failure = 500
 }
 

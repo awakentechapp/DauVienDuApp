@@ -97,6 +97,33 @@ data class LoginRequest(
     @SerializedName("password") val password: String
 )
 
+data class PasswordResetRequest(
+    @SerializedName("email") val email: String
+)
+
+data class ConfirmPasswordResetRequest(
+    @SerializedName("email") val email: String,
+    @SerializedName("code") val code: String,
+    @SerializedName("newPassword") val newPassword: String
+)
+
+data class MessageResponseDto(
+    @SerializedName("message") val message: String
+)
+
+data class CreateManagedUserRequest(
+    @SerializedName("email") val email: String,
+    @SerializedName("password") val password: String,
+    @SerializedName("displayName") val displayName: String,
+    // System.Text.Json currently binds UserRole as its numeric enum values: Tourist=1, Admin=2.
+    @SerializedName("role") val role: Int,
+    @SerializedName("preferredLanguage") val preferredLanguage: String = "vi"
+)
+
+data class UpdateManagedUserStatusRequest(
+    @SerializedName("isActive") val isActive: Boolean
+)
+
 data class RefreshTokenRequest(
     @SerializedName("refreshToken") val refreshToken: String
 )

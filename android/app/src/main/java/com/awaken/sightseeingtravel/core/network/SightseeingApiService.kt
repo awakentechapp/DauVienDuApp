@@ -35,6 +35,12 @@ interface SightseeingApiService {
     @POST("api/v1/auth/login")
     suspend fun login(@Body request: LoginRequest): ApiEnvelope<AuthTokensResponse>
 
+    @POST("api/v1/auth/password-reset/request")
+    suspend fun requestPasswordReset(@Body request: PasswordResetRequest): ApiEnvelope<MessageResponseDto>
+
+    @POST("api/v1/auth/password-reset/confirm")
+    suspend fun confirmPasswordReset(@Body request: ConfirmPasswordResetRequest): ApiEnvelope<MessageResponseDto>
+
     @POST("api/v1/auth/refresh")
     suspend fun refreshToken(@Body request: RefreshTokenRequest): ApiEnvelope<AuthTokensResponse>
 
@@ -222,6 +228,22 @@ interface SightseeingApiService {
         @Path("photoId") photoId: String,
         @Body request: ModeratePhotoDecisionRequest
     ): ApiEnvelope<ModerationPhotoItemDto>
+
+    // ------------------------------------------------------------------------
+    // SuperAdmin account management
+    // ------------------------------------------------------------------------
+
+    @GET("api/v1/admin/users")
+    suspend fun getManagedUsers(): ApiEnvelope<List<UserProfileDto>>
+
+    @POST("api/v1/admin/users")
+    suspend fun createManagedUser(@Body request: CreateManagedUserRequest): ApiEnvelope<UserProfileDto>
+
+    @PATCH("api/v1/admin/users/{userId}/status")
+    suspend fun updateManagedUserStatus(
+        @Path("userId") userId: String,
+        @Body request: UpdateManagedUserStatusRequest
+    ): ApiEnvelope<UserProfileDto>
 }
 
 /**

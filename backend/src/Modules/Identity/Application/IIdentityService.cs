@@ -6,6 +6,8 @@ public interface IIdentityService
 {
     Task<Result<AuthTokenResponse>> RegisterTouristAsync(RegisterRequest request, CancellationToken ct = default);
     Task<Result<AuthTokenResponse>> LoginAsync(LoginRequest request, CancellationToken ct = default);
+    Task<Result> RequestPasswordResetAsync(string email, CancellationToken ct = default);
+    Task<Result> ConfirmPasswordResetAsync(ResetPasswordRequest request, CancellationToken ct = default);
     Task<Result<AuthTokenResponse>> RefreshTokenAsync(RefreshTokenRequest request, CancellationToken ct = default);
     Task<Result> LogoutAsync(LogoutRequest request, CancellationToken ct = default);
     Task<Result<UserProfileDto>> GetCurrentUserProfileAsync(CancellationToken ct = default);

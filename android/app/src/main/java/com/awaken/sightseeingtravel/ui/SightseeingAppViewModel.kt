@@ -250,6 +250,119 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
+    fun requestPasswordReset(email: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, statusBannerMessage = null) }
+            try {
+                val response = apiService.requestPasswordReset(PasswordResetRequest(email.trim()))
+                _uiState.update {
+                    if (response.success) {
+                        it.copy(
+                            isLoading = false,
+                            statusBannerMessage = response.data?.message
+                                ?: "If the email belongs to an account, reset instructions will be sent when email delivery is available."
+                        )
+                    } else {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = response.error?.message ?: "Could not send a password reset code."
+                        )
+                    }
+                }
+            } catch (error: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = apiErrorMessage(error, "Could not send a password reset code.")
+                    )
+                }
+            }
+        }
+    }
+
+    fun confirmPasswordReset(
+        email: String,
+        code: String,
+        newPassword: String,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, statusBannerMessage = null) }
+            try {
+                val response = apiService.confirmPasswordReset(
+                    ConfirmPasswordResetRequest(email.trim(), code.trim(), newPassword)
+                )
+                if (response.success) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            statusBannerMessage = response.data?.message ?: "Your password has been reset."
+                        )
+                    }
+                    onSuccess()
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = response.error?.message ?: "The reset code is invalid or expired."
+                        )
+                    }
+                }
+            } catch (error: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = apiErrorMessage(error, "Could not reset the password.")
+                    )
+                }
+            }
+        }
+    }
+
+    private fun requireSuperAdminForAccountManagement() {
+        check(_uiState.value.currentUser?.isSuperAdmin == true) {
+            "Chỉ Super Admin được quản lý tài khoản."
+        }
+    }
+
+    suspend fun loadManagedAccounts(): List<UserProfileDto> {
+        requireSuperAdminForAccountManagement()
+        val response = apiService.getManagedUsers()
+        if (!response.success || response.data == null) {
+            throw IllegalStateException(response.error?.message ?: "Không tải được danh sách tài khoản.")
+        }
+        return response.data
+    }
+
+    suspend fun createManagedAccount(request: CreateManagedUserRequest): UserProfileDto {
+        requireSuperAdminForAccountManagement()
+        val response = apiService.createManagedUser(request)
+        if (!response.success || response.data == null) {
+            throw IllegalStateException(response.error?.message ?: "Không tạo được tài khoản.")
+        }
+        return response.data
+    }
+
+    suspend fun setManagedAccountActive(userId: String, isActive: Boolean): UserProfileDto {
+        requireSuperAdminForAccountManagement()
+        val response = apiService.updateManagedUserStatus(userId, UpdateManagedUserStatusRequest(isActive))
+        if (!response.success || response.data == null) {
+            throw IllegalStateException(response.error?.message ?: "Không cập nhật được tài khoản.")
+        }
+        return response.data
+    }
+
+    private fun apiErrorMessage(error: Exception, fallback: String): String {
+        val httpError = error as? HttpException ?: return error.message ?: fallback
+        val responseText = runCatching { httpError.response()?.errorBody()?.string() }.getOrNull()
+        val root = runCatching { JSONObject(responseText.orEmpty()) }.getOrNull()
+        return root?.optJSONObject("error")?.optString("message")
+            ?.takeIf { it.isNotBlank() }
+            ?: root?.optString("message")?.takeIf { it.isNotBlank() }
+            ?: error.message
+            ?: fallback
+    }
+
     fun logout() {
         viewModelScope.launch {
             clearNavigation()
