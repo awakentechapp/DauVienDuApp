@@ -129,9 +129,7 @@ private fun formatDurationLabel(seconds: Double, isEn: Boolean): String {
 }
 
 private fun isFoodCategory(category: String): Boolean {
-    return category.contains("Ăn uống", ignoreCase = true) ||
-        category.contains("Food", ignoreCase = true) ||
-        category.contains("Ẩm thực", ignoreCase = true)
+    return PoiCategoryLabels.isFood(category)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -196,9 +194,10 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                     spatialPose = spatialPose,
                     currentUserId = uiState.currentUser?.id,
                     isUploadingPhoto = uiState.isUploadingPhoto,
+                    uploadErrorMessage = uiState.errorMessage,
                     selectedLanguage = uiState.selectedLanguage,
-                    onCaptureAndUploadPhoto = { file, caption ->
-                        viewModel.uploadCapturedPhoto(arCtx.poiId, file, caption)
+                    onCaptureAndUploadPhoto = { file, caption, anchor, onSuccess ->
+                        viewModel.uploadCapturedPhoto(arCtx.poiId, file, caption, anchor, onSuccess)
                     },
                     onToggleLikePhoto = { photoId ->
                         viewModel.toggleLikePhoto(photoId)
@@ -233,6 +232,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                 adminArCardsByPoi = uiState.adminArCardsByPoi,
                 onCreateFixedArCard = viewModel::createAdminArInfoCard,
                 onUpdateArInfoCard = viewModel::updateAdminArInfoCard,
+                onDeleteArInfoCard = viewModel::deleteAdminArInfoCard,
                 onFilterStatusChange = { status ->
                     viewModel.loadAdminConsoleData(status)
                 },
@@ -242,6 +242,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                 onUpdatePoiSubmit = { poiId, request, coverImageUri ->
                     viewModel.updatePoiAsAdmin(poiId, request, coverImageUri)
                 },
+                onDeletePoi = viewModel::deletePoiAsSuperAdmin,
                 onSuperAdminApprovePoi = { poiId, notes ->
                     viewModel.approvePoiAsSuperAdmin(poiId, notes)
                 },
@@ -769,7 +770,7 @@ private fun PoiFeaturedHorizontalCard(
 
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = pin.category.uppercase(),
+                    text = PoiCategoryLabels.label(pin.category, if (isEn) "en" else "vi").uppercase(),
                     color = if (isFood) Color(0xFFE11D48) else Color(0xFF0284C7),
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold
@@ -1062,7 +1063,7 @@ private fun PlacesDirectoryTabScreen(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = pin.category,
+                                        text = PoiCategoryLabels.label(pin.category, if (isEn) "en" else "vi"),
                                         color = Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
@@ -1867,7 +1868,7 @@ private fun PoiCulturalStoryCard(
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
-                                text = detail.category,
+                                text = PoiCategoryLabels.label(detail.category, selectedLanguage),
                                 color = if (isFood) Color(0xFFE11D48) else Color(0xFF0369A1),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,

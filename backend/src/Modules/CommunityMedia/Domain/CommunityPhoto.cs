@@ -32,6 +32,7 @@ public sealed class CommunityPhoto : AuditableEntity
     public double CapturedLongitude { get; private set; }
     public double DistanceFromPoiMeters { get; private set; }
     public double? AzimuthDegrees { get; private set; }
+    public double? PitchDegrees { get; private set; }
     public int LikeCount { get; private set; }
     public int ReportCount { get; private set; }
     public CommunityPhotoStatus Status { get; private set; } = CommunityPhotoStatus.Published;
@@ -58,6 +59,7 @@ public sealed class CommunityPhoto : AuditableEntity
         double capturedLongitude,
         double distanceFromPoiMeters,
         double? azimuthDegrees,
+        double? pitchDegrees,
         DateTimeOffset createdAt)
     {
         Id = id == Guid.Empty ? Guid.NewGuid() : id;
@@ -71,6 +73,7 @@ public sealed class CommunityPhoto : AuditableEntity
         CapturedLongitude = capturedLongitude;
         DistanceFromPoiMeters = distanceFromPoiMeters;
         AzimuthDegrees = azimuthDegrees;
+        PitchDegrees = pitchDegrees;
         LikeCount = 0;
         ReportCount = 0;
         Status = CommunityPhotoStatus.Published;

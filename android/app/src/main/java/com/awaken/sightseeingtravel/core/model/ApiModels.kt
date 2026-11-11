@@ -145,7 +145,7 @@ data class UpdateProfileRequest(
 data class PoiPinSummaryDto(
     @SerializedName("id") val id: String,
     @SerializedName("slug") val slug: String = "",
-    @SerializedName("category") val category: String = "Heritage",
+    @SerializedName("category") val category: String = PoiCategoryLabels.HISTORICAL_SITE,
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("elevationMeters") val elevationMeters: Double = 0.0,
@@ -171,7 +171,7 @@ data class PoiPinSummaryDto(
 data class PoiDetailDto(
     @SerializedName("id") val id: String,
     @SerializedName("slug") val slug: String = "",
-    @SerializedName("category") val category: String = "Heritage",
+    @SerializedName("category") val category: String = PoiCategoryLabels.HISTORICAL_SITE,
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("elevationMeters") val elevationMeters: Double = 0.0,
@@ -252,6 +252,7 @@ data class CommunityPhotoDto(
     @SerializedName("capturedLatitude") val capturedLatitude: Double = 0.0,
     @SerializedName("capturedLongitude") val capturedLongitude: Double = 0.0,
     @SerializedName("azimuthDegrees") val azimuthDegrees: Float? = null,
+    @SerializedName("pitchDegrees") val pitchDegrees: Float? = null,
     @SerializedName("elevationMeters") val elevationMeters: Float = 1.5f,
     @SerializedName("likeCount") val likeCount: Int = 0,
     @SerializedName("isLikedByCurrentUser") val isLikedByCurrentUser: Boolean = false,
@@ -361,7 +362,7 @@ data class RejectPoiRequest(
 data class AdminPoiDto(
     @SerializedName("id") val id: String,
     @SerializedName(value = "slug", alternate = ["code"]) val slug: String,
-    @SerializedName("category") val category: String = "Heritage Landmark",
+    @SerializedName("category") val category: String = PoiCategoryLabels.HISTORICAL_SITE,
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("activationRadiusMeters") val activationRadiusMeters: Double = 50.0,

@@ -3,6 +3,7 @@ namespace SightseeingTravel.Modules.Attractions.Application;
 public sealed record NearbyPoiItemDto(
     Guid Id,
     string Code,
+    string Category,
     string Name,
     string ShortSummary,
     double Latitude,
@@ -19,6 +20,7 @@ public sealed record NearbyPoisResponse(
 public sealed record PoiDetailDto(
     Guid Id,
     string Code,
+    string Category,
     string LanguageCode,
     string Name,
     string ShortSummary,
@@ -47,14 +49,16 @@ public sealed record CreatePoiRequest(
     double ActivationRadiusMeters,
     bool SaveAsDraft,
     string? CoverImageUrl,
-    IReadOnlyList<PoiLocalizationInputDto> Localizations);
+    IReadOnlyList<PoiLocalizationInputDto> Localizations,
+    string? Category = null);
 
 public sealed record UpdatePoiRequest(
     double Latitude,
     double Longitude,
     double ActivationRadiusMeters,
     string? CoverImageUrl,
-    IReadOnlyList<PoiLocalizationInputDto> Localizations);
+    IReadOnlyList<PoiLocalizationInputDto> Localizations,
+    string? Category = null);
 
 public sealed record RejectPoiRequest(
     string Reason);
@@ -62,6 +66,7 @@ public sealed record RejectPoiRequest(
 public sealed record AdminPoiDto(
     Guid Id,
     string Code,
+    string Category,
     double Latitude,
     double Longitude,
     double ActivationRadiusMeters,

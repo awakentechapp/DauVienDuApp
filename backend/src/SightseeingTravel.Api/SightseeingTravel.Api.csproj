@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Migrations/0002_PoiCategoryPhotoPoseAndArCascade.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\SightseeingTravel.SharedKernel\SightseeingTravel.SharedKernel.csproj" />
     <ProjectReference Include="..\Modules\Identity\SightseeingTravel.Modules.Identity.csproj" />
     <ProjectReference Include="..\Modules\Attractions\SightseeingTravel.Modules.Attractions.csproj" />

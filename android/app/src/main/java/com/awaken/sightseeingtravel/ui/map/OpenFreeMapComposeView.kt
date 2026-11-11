@@ -18,6 +18,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.awaken.sightseeingtravel.core.model.PoiPinSummaryDto
+import com.awaken.sightseeingtravel.core.model.PoiCategoryLabels
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.ActiveNavigationRoute
@@ -524,9 +525,7 @@ private fun updateGeoJsonLayers(
         val hasFreshGps = spatialPose.hasFreshGpsFix &&
             !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f
         val isUnlocked = hasFreshGps && poi.canUnlockAr(liveDistance)
-        val isFood = poi.category.contains("Ăn uống", ignoreCase = true) ||
-            poi.category.contains("Food", ignoreCase = true) ||
-            poi.category.contains("Ẩm thực", ignoreCase = true)
+        val isFood = PoiCategoryLabels.isFood(poi.category)
         val iconKey = when {
             isUnlocked -> ICON_POI_UNLOCKED
             isFood -> ICON_POI_FOOD

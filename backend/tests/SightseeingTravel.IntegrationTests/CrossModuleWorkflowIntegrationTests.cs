@@ -167,6 +167,7 @@ public sealed class CrossModuleWorkflowIntegrationTests
             CapturedLatitude: 21.0359,
             CapturedLongitude: 105.8337,
             AzimuthDegrees: 120.0,
+            PitchDegrees: 0.0,
             Caption: "Beautiful lotus temple!"));
 
         Assert.True(uploadResult.IsSuccess);

@@ -105,6 +105,7 @@ public sealed class AttractionService : IAttractionService
                 return new NearbyPoiItemDto(
                     x.Poi.Id,
                     x.Poi.Code,
+                    x.Poi.Category,
                     loc?.Name ?? x.Poi.Code,
                     loc?.ShortSummary ?? string.Empty,
                     x.Poi.Latitude,
@@ -177,6 +178,7 @@ public sealed class AttractionService : IAttractionService
         var dto = new PoiDetailDto(
             poi.Id,
             poi.Code,
+            poi.Category,
             loc?.LanguageCode ?? SupportedLanguages.Normalize(effectiveLang),
             loc?.Name ?? poi.Code,
             loc?.ShortSummary ?? string.Empty,
@@ -250,6 +252,7 @@ public sealed class AttractionService : IAttractionService
         var now = _dateTimeProvider.UtcNow;
         var createResult = PointOfInterest.Create(
             normalizedCode,
+            request.Category,
             request.Latitude,
             request.Longitude,
             request.ActivationRadiusMeters,
@@ -309,6 +312,7 @@ public sealed class AttractionService : IAttractionService
 
         var now = _dateTimeProvider.UtcNow;
         var updateResult = poi.UpdateDetails(
+            request.Category,
             request.Latitude,
             request.Longitude,
             request.ActivationRadiusMeters,
@@ -627,6 +631,7 @@ public sealed class AttractionService : IAttractionService
         return new AdminPoiDto(
             poi.Id,
             poi.Code,
+            poi.Category,
             poi.Latitude,
             poi.Longitude,
             poi.ActivationRadiusMeters,

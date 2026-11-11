@@ -65,15 +65,16 @@ public sealed class DomainAndSharedKernelTests
 
         // 1. Admin creates POI -> PendingApproval (F-03)
         var createResult = PointOfInterest.Create(
-            "POI-TEST-01",
-            21.0278,
-            105.8523,
-            100.0,
-            null,
-            adminId,
-            UserRole.Admin,
+            code: "POI-TEST-01",
+            category: PoiCategories.HistoricalSite,
+            latitude: 21.0278,
+            longitude: 105.8523,
+            activationRadiusMeters: 100.0,
+            coverImageUrl: null,
+            createdBy: adminId,
+            creatorRole: UserRole.Admin,
             saveAsDraft: false,
-            now);
+            now: now);
 
         Assert.True(createResult.IsSuccess);
         var poi = createResult.Value;
@@ -91,7 +92,15 @@ public sealed class DomainAndSharedKernelTests
         Assert.Equal(superAdminId, poi.ApprovedBy);
 
         // 4. Admin updates a Published POI -> Reverts to PendingApproval for SuperAdmin re-approval
-        var updateByAdmin = poi.UpdateDetails(21.0279, 105.8525, 120.0, null, UserRole.Admin, adminId, now);
+        var updateByAdmin = poi.UpdateDetails(
+            category: null,
+            latitude: 21.0279,
+            longitude: 105.8525,
+            activationRadiusMeters: 120.0,
+            coverImageUrl: null,
+            editorRole: UserRole.Admin,
+            editorId: adminId,
+            now: now);
         Assert.True(updateByAdmin.IsSuccess);
         Assert.Equal(PoiStatus.PendingApproval, poi.Status);
     }
@@ -112,6 +121,7 @@ public sealed class DomainAndSharedKernelTests
             105.8523,
             15.0,
             90.0,
+            0.0,
             now);
 
         Assert.Equal(CommunityPhotoStatus.Published, photo.Status);

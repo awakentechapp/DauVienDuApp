@@ -100,6 +100,7 @@ interface SightseeingApiService {
         @Part("capturedLatitude") capturedLatitude: RequestBody,
         @Part("capturedLongitude") capturedLongitude: RequestBody,
         @Part("azimuthDegrees") azimuthDegrees: RequestBody,
+        @Part("pitchDegrees") pitchDegrees: RequestBody,
         @Part("caption") caption: RequestBody
     ): ApiEnvelope<CommunityPhotoDto>
 
@@ -139,6 +140,11 @@ interface SightseeingApiService {
         @Body request: CreateOrUpdatePoiRequest
     ): ApiEnvelope<AdminPoiDto>
 
+    @DELETE("api/v1/admin/pois/{poiId}")
+    suspend fun deletePoi(
+        @Path("poiId") poiId: String
+    ): Response<ResponseBody>
+
     @Multipart
     @POST("api/v1/admin/pois/{poiId}/cover")
     suspend fun uploadPoiCoverImage(
@@ -162,6 +168,11 @@ interface SightseeingApiService {
         @Path("cardId") cardId: String,
         @Body request: UpsertArInfoCardRequest
     ): Response<AdminArInfoCardDto>
+
+    @DELETE("api/v1/admin/ar-cards/{cardId}")
+    suspend fun deleteArInfoCard(
+        @Path("cardId") cardId: String
+    ): Response<ResponseBody>
 
     /**
      * SuperAdmin ONLY: Approves a `PendingApproval` POI and sets status to `Published`
@@ -300,6 +311,7 @@ object SightseeingNetworkModule {
         capturedLatitude: Double,
         capturedLongitude: Double,
         azimuthDegrees: Float,
+        pitchDegrees: Float,
         caption: String
     ): PhotoMultipartPayload {
         val compressedBytes = compressJpegAround300Kb(photoFile)
@@ -315,6 +327,7 @@ object SightseeingNetworkModule {
             capturedLatitude = capturedLatitude.toString().toRequestBody(textPlain),
             capturedLongitude = capturedLongitude.toString().toRequestBody(textPlain),
             azimuthDegrees = azimuthDegrees.toString().toRequestBody(textPlain),
+            pitchDegrees = pitchDegrees.toString().toRequestBody(textPlain),
             caption = caption.trim().toRequestBody(textPlain)
         )
     }
@@ -389,5 +402,6 @@ data class PhotoMultipartPayload(
     val capturedLatitude: RequestBody,
     val capturedLongitude: RequestBody,
     val azimuthDegrees: RequestBody,
+    val pitchDegrees: RequestBody,
     val caption: RequestBody
 )

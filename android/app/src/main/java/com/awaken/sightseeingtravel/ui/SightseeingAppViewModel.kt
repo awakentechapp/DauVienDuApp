@@ -779,18 +779,19 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         poiId: String,
         photoFile: File,
         caption: String,
+        anchor: PhotoAnchorSnapshot,
         onSuccess: () -> Unit = {}
     ) {
-        val pose = spatialPose.value
         viewModelScope.launch {
             _uiState.update { it.copy(isUploadingPhoto = true, errorMessage = null) }
             try {
                 val multipart = withContext(Dispatchers.IO) {
                     SightseeingNetworkModule.buildPhotoUploadMultipart(
                         photoFile = photoFile,
-                        capturedLatitude = pose.latitude,
-                        capturedLongitude = pose.longitude,
-                        azimuthDegrees = pose.azimuthDegrees,
+                        capturedLatitude = anchor.latitude,
+                        capturedLongitude = anchor.longitude,
+                        azimuthDegrees = anchor.azimuthDegrees,
+                        pitchDegrees = anchor.pitchDegrees,
                         caption = caption
                     )
                 }
@@ -800,6 +801,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                     capturedLatitude = multipart.capturedLatitude,
                     capturedLongitude = multipart.capturedLongitude,
                     azimuthDegrees = multipart.azimuthDegrees,
+                    pitchDegrees = multipart.pitchDegrees,
                     caption = multipart.caption
                 )
                 val uploadedPhoto = response.data
@@ -1196,6 +1198,36 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
+    suspend fun deleteAdminArInfoCard(cardId: String): String? {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            return "Chỉ tài khoản Admin hoặc Super Admin mới được xóa thẻ AR."
+        }
+
+        return try {
+            val response = apiService.deleteArInfoCard(cardId)
+            if (!response.isSuccessful) return "Không thể xóa thẻ AR (HTTP ${response.code()})."
+
+            _uiState.update { state ->
+                val updatedCardsByPoi = state.adminArCardsByPoi.mapValues { (_, cards) ->
+                    cards.filterNot { it.id == cardId }
+                }
+                val countsByPoi = updatedCardsByPoi.mapValues { it.value.size }
+                state.copy(
+                    adminArCardsByPoi = updatedCardsByPoi,
+                    adminPois = state.adminPois.map { poi ->
+                        countsByPoi[poi.id]?.let { poi.copy(arInfoCardCount = it) } ?: poi
+                    },
+                    statusBannerMessage = "Đã xóa thẻ AR."
+                )
+            }
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.message ?: "Không thể xóa thẻ AR. Vui lòng thử lại."
+        }
+    }
+
     fun updatePoiAsAdmin(
         poiId: String,
         request: CreateOrUpdatePoiRequest,
@@ -1226,6 +1258,45 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             } catch (error: Exception) {
                 _uiState.update {
                     it.copy(isLoading = false, errorMessage = error.message ?: "Không thể cập nhật POI.")
+                }
+            }
+        }
+    }
+
+    fun deletePoiAsSuperAdmin(poiId: String) {
+        if (_uiState.value.currentUser?.isSuperAdmin != true) {
+            _uiState.update { it.copy(errorMessage = "Chỉ Super Admin mới có quyền xóa POI.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            try {
+                val response = apiService.deletePoi(poiId)
+                if (!response.isSuccessful) {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = "Không thể xóa POI (HTTP ${response.code()}).")
+                    }
+                    return@launch
+                }
+
+                _uiState.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        adminPois = state.adminPois.filterNot { it.id == poiId },
+                        adminArCardsByPoi = state.adminArCardsByPoi - poiId,
+                        nearbyPois = state.nearbyPois.filterNot { it.id == poiId },
+                        selectedPoiDetail = state.selectedPoiDetail?.takeUnless { it.id == poiId },
+                        activeArContext = state.activeArContext?.takeUnless { it.poiId == poiId },
+                        navigationTarget = state.navigationTarget?.takeUnless { it.poiId == poiId },
+                        statusBannerMessage = "Đã xóa POI và các thẻ AR liên quan."
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _uiState.update {
+                    it.copy(isLoading = false, errorMessage = error.message ?: "Không thể xóa POI.")
                 }
             }
         }
@@ -1620,8 +1691,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             summaryPin.longitude
         )
 
-        val isFoodPoi = summaryPin.category.contains("Ăn uống", ignoreCase = true) ||
-            summaryPin.category.contains("Food", ignoreCase = true)
+        val isFoodPoi = PoiCategoryLabels.isFood(summaryPin.category)
 
         val arCards = if (isFoodPoi) {
             listOf(

@@ -60,7 +60,7 @@ internal object ApiResponseAdapters {
             return PoiPinSummaryDto(
                 id = value.string("id"),
                 slug = value.string("code", "slug"),
-                category = value.string("category", default = "Heritage"),
+                category = value.string("category", default = PoiCategoryLabels.HISTORICAL_SITE),
                 latitude = value.double("latitude"),
                 longitude = value.double("longitude"),
                 elevationMeters = value.double("elevationMeters"),
@@ -84,7 +84,7 @@ internal object ApiResponseAdapters {
             return PoiDetailDto(
                 id = value.string("id"),
                 slug = value.string("code", "slug"),
-                category = value.string("category", default = "Heritage"),
+                category = value.string("category", default = PoiCategoryLabels.HISTORICAL_SITE),
                 latitude = value.double("latitude"),
                 longitude = value.double("longitude"),
                 elevationMeters = value.double("elevationMeters"),
@@ -134,7 +134,7 @@ internal object ApiResponseAdapters {
             return PoiArContextDto(
                 poiId = value.string("poiId"),
                 title = value.string("poiName", "title"),
-                category = value.string("category", default = "Heritage"),
+                category = value.string("category", default = PoiCategoryLabels.HISTORICAL_SITE),
                 latitude = value.double("poiLatitude", "latitude"),
                 longitude = value.double("poiLongitude", "longitude"),
                 activationRadiusMeters = value.double("activationRadiusMeters", default = 50.0),
@@ -161,6 +161,7 @@ internal object ApiResponseAdapters {
                 capturedLatitude = value.double("capturedLatitude"),
                 capturedLongitude = value.double("capturedLongitude"),
                 azimuthDegrees = value.nullableDouble("azimuthDegrees")?.toFloat(),
+                pitchDegrees = value.nullableDouble("pitchDegrees")?.toFloat(),
                 elevationMeters = value.double("elevationMeters", default = 1.5).toFloat(),
                 likeCount = value.int("likeCount", "likesCount"),
                 isLikedByCurrentUser = value.nullableBoolean("isLikedByCurrentUser") ?: false,

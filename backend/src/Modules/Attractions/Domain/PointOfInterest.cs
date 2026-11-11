@@ -19,6 +19,7 @@ public sealed class PointOfInterest : AuditableEntity
     public const double MaxActivationRadiusMeters = 2000.0;
 
     public string Code { get; private set; } = string.Empty;
+    public string Category { get; private set; } = PoiCategories.HistoricalSite;
     public double Latitude { get; private set; }
     public double Longitude { get; private set; }
     public double ActivationRadiusMeters { get; private set; } = DefaultActivationRadiusMeters;
@@ -38,6 +39,7 @@ public sealed class PointOfInterest : AuditableEntity
 
     public static Result<PointOfInterest> Create(
         string code,
+        string? category,
         double latitude,
         double longitude,
         double activationRadiusMeters,
@@ -60,6 +62,14 @@ public sealed class PointOfInterest : AuditableEntity
             return Result.Failure<PointOfInterest>(new Error(
                 ErrorCodes.PoiInvalidStateTransition,
                 "POI code is required.",
+                ErrorType.Validation));
+        }
+
+        if (!PoiCategories.TryNormalize(category ?? PoiCategories.HistoricalSite, out var normalizedCategory))
+        {
+            return Result.Failure<PointOfInterest>(new Error(
+                "POI_INVALID_CATEGORY",
+                "Category must be one of the supported POI categories.",
                 ErrorType.Validation));
         }
 
@@ -103,6 +113,7 @@ public sealed class PointOfInterest : AuditableEntity
         {
             Id = Guid.NewGuid(),
             Code = NormalizeCode(code),
+            Category = normalizedCategory,
             Latitude = latitude,
             Longitude = longitude,
             ActivationRadiusMeters = radius,
@@ -119,6 +130,7 @@ public sealed class PointOfInterest : AuditableEntity
     }
 
     public Result UpdateDetails(
+        string? category,
         double latitude,
         double longitude,
         double activationRadiusMeters,
@@ -143,6 +155,15 @@ public sealed class PointOfInterest : AuditableEntity
                 ErrorType.Validation));
         }
 
+        var normalizedCategory = Category;
+        if (!string.IsNullOrWhiteSpace(category) && !PoiCategories.TryNormalize(category, out normalizedCategory))
+        {
+            return Result.Failure(new Error(
+                "POI_INVALID_CATEGORY",
+                "Category must be one of the supported POI categories.",
+                ErrorType.Validation));
+        }
+
         var radius = activationRadiusMeters <= 0 ? DefaultActivationRadiusMeters : activationRadiusMeters;
         if (radius is < MinActivationRadiusMeters or > MaxActivationRadiusMeters)
         {
@@ -154,6 +175,7 @@ public sealed class PointOfInterest : AuditableEntity
 
         Latitude = latitude;
         Longitude = longitude;
+        Category = normalizedCategory;
         ActivationRadiusMeters = radius;
 
         if (!string.IsNullOrWhiteSpace(coverImageUrl))

@@ -1,6 +1,7 @@
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SightseeingTravel.SharedKernel.Abstractions;
 
@@ -11,6 +12,7 @@ public sealed class ContaboStorageOptions
     public const string SectionName = "ContaboStorage";
 
     public string ServiceUrl { get; set; } = "https://sin1.contabostorage.com";
+    public string AuthenticationRegion { get; set; } = "default";
     public string BucketName { get; set; } = "awakencloud";
     public string PublicBaseUrl { get; set; } = "https://sin1.contabostorage.com/3e270ee749cc4c6caa56fcceac2c4202:awakencloud";
     public string KeyPrefix { get; set; } = "dauviendu_cloud";
@@ -29,15 +31,21 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
 
     private readonly ContaboStorageOptions _options;
     private readonly IAmazonS3 _s3Client;
+    private readonly ILogger<ContaboS3ObjectStorageService> _logger;
 
-    public ContaboS3ObjectStorageService(IOptions<ContaboStorageOptions> options)
+    public ContaboS3ObjectStorageService(
+        IOptions<ContaboStorageOptions> options,
+        ILogger<ContaboS3ObjectStorageService> logger)
     {
         _options = options.Value;
+        _logger = logger;
 
         var s3Config = new AmazonS3Config
         {
             ServiceURL = _options.ServiceUrl,
             ForcePathStyle = _options.ForcePathStyle,
+            AuthenticationRegion = _options.AuthenticationRegion,
+            SignatureVersion = "4",
             UseHttp = _options.ServiceUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
         };
 
@@ -61,10 +69,26 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
             Key = normalizedKey,
             InputStream = fileStream,
             ContentType = contentType,
+            // Contabo's S3-compatible Ceph endpoint can reject AWS's streaming chunk signature.
+            UseChunkEncoding = false,
             AutoCloseStream = false
         };
 
-        await _s3Client.PutObjectAsync(putRequest, cancellationToken);
+        try
+        {
+            await _s3Client.PutObjectAsync(putRequest, cancellationToken);
+        }
+        catch (AmazonS3Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Contabo S3 PutObject failed. Bucket={BucketName}, ErrorCode={ErrorCode}, HttpStatus={HttpStatus}, RequestId={RequestId}",
+                _options.BucketName,
+                exception.ErrorCode,
+                (int)exception.StatusCode,
+                exception.RequestId);
+            throw new ObjectStorageUploadException("The object storage upload failed.", exception);
+        }
 
         var storageUrl = $"{_options.PublicBaseUrl.TrimEnd('/')}/{normalizedKey}";
         var length = fileStream.CanSeek ? fileStream.Length : 0L;

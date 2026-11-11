@@ -87,6 +87,14 @@ public sealed class CommunityMediaService : ICommunityMediaService
                 ErrorType.Validation));
         }
 
+        if (command.PitchDegrees.HasValue && (command.PitchDegrees.Value < -90.0 || command.PitchDegrees.Value > 90.0))
+        {
+            return Result.Failure<CommunityPhotoDto>(new Error(
+                "PHOTO_INVALID_PITCH",
+                "Pitch degrees must be between -90 and 90.",
+                ErrorType.Validation));
+        }
+
         if (!string.IsNullOrWhiteSpace(command.Caption) && command.Caption.Trim().Length > CommunityPhoto.MaxCaptionLength)
         {
             return Result.Failure<CommunityPhotoDto>(new Error(
@@ -152,11 +160,22 @@ public sealed class CommunityMediaService : ICommunityMediaService
         var photoId = Guid.NewGuid();
         var objectKey = $"pois/{command.PoiId}/community/{now:yyyy}/{now:MM}/{photoId}{extension}";
 
-        var uploadResult = await _objectStorageService.UploadPhotoAsync(
-            command.FileStream,
-            resolvedContentType,
-            objectKey,
-            ct);
+        StorageUploadResult uploadResult;
+        try
+        {
+            uploadResult = await _objectStorageService.UploadPhotoAsync(
+                command.FileStream,
+                resolvedContentType,
+                objectKey,
+                ct);
+        }
+        catch (ObjectStorageUploadException)
+        {
+            return Result.Failure<CommunityPhotoDto>(new Error(
+                "PHOTO_STORAGE_UPLOAD_FAILED",
+                "Không thể lưu ảnh vào kho lưu trữ. Vui lòng thử lại sau.",
+                ErrorType.Failure));
+        }
 
         // 5. Save CommunityPhoto with Status = Published
         var photo = new CommunityPhoto(
@@ -171,6 +190,7 @@ public sealed class CommunityMediaService : ICommunityMediaService
             capturedLongitude: command.CapturedLongitude,
             distanceFromPoiMeters: actualDistanceMeters,
             azimuthDegrees: command.AzimuthDegrees,
+            pitchDegrees: command.PitchDegrees,
             createdAt: now);
 
         _dbContext.CommunityPhotos.Add(photo);
@@ -462,6 +482,7 @@ public sealed class CommunityMediaService : ICommunityMediaService
             photo.CapturedLongitude,
             photo.DistanceFromPoiMeters,
             photo.AzimuthDegrees,
+            photo.PitchDegrees,
             photo.LikeCount,
             isLikedByCurrentUser,
             photo.CreatedAt);

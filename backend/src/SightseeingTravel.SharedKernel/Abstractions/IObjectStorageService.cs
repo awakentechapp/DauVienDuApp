@@ -2,6 +2,14 @@ namespace SightseeingTravel.SharedKernel.Abstractions;
 
 public sealed record StorageUploadResult(string ObjectKey, string StorageUrl, long SizeBytes, string ContentType);
 
+public sealed class ObjectStorageUploadException : Exception
+{
+    public ObjectStorageUploadException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
 public interface IObjectStorageService
 {
     Task<StorageUploadResult> UploadPhotoAsync(

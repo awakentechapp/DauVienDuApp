@@ -51,9 +51,11 @@ fun AdminApprovalAndModerationScreen(
     adminArCardsByPoi: Map<String, List<AdminArInfoCardDto>>,
     onCreateFixedArCard: suspend (String, UpsertArInfoCardRequest) -> String?,
     onUpdateArInfoCard: suspend (String, UpsertArInfoCardRequest) -> String?,
+    onDeleteArInfoCard: suspend (String) -> String?,
     onFilterStatusChange: (String?) -> Unit,
     onCreatePoiSubmit: (CreateOrUpdatePoiRequest, Uri?) -> Unit,
     onUpdatePoiSubmit: (String, CreateOrUpdatePoiRequest, Uri?) -> Unit,
+    onDeletePoi: (String) -> Unit,
     onSuperAdminApprovePoi: (String, String) -> Unit,
     onSuperAdminRejectPoi: (String, String) -> Unit,
     onModeratePhotoDecision: (String, String, String?) -> Unit,
@@ -66,7 +68,12 @@ fun AdminApprovalAndModerationScreen(
     var poiForFixedArCard by remember { mutableStateOf<AdminPoiDto?>(null) }
     var arCardForEdit by remember { mutableStateOf<AdminArInfoCardDto?>(null) }
     var poiIdPendingRejection by remember { mutableStateOf<AdminPoiDto?>(null) }
+    var poiPendingDeletion by remember { mutableStateOf<AdminPoiDto?>(null) }
+    var arCardPendingDeletion by remember { mutableStateOf<AdminArInfoCardDto?>(null) }
+    var arCardDeleteError by remember { mutableStateOf<String?>(null) }
+    var isDeletingArCard by remember { mutableStateOf(false) }
     var rejectionReasonInput by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -144,7 +151,12 @@ fun AdminApprovalAndModerationScreen(
                     },
                     onCreateFixedArCard = { poi -> poiForFixedArCard = poi },
                     onEditPoi = { poi -> poiForEdit = poi },
-                    onEditArCard = { card -> arCardForEdit = card }
+                    onEditArCard = { card -> arCardForEdit = card },
+                    onDeletePoi = { poi -> poiPendingDeletion = poi },
+                    onDeleteArCard = { card ->
+                        arCardDeleteError = null
+                        arCardPendingDeletion = card
+                    }
                 )
             } else {
                 ReportedPhotoModerationTab(
@@ -160,6 +172,7 @@ fun AdminApprovalAndModerationScreen(
     // ========================================================================
     if (showCreatePoiDialog) {
         CreatePoiDialog(
+            selectedLanguage = selectedLanguage,
             defaultLatitude = defaultLatitude,
             defaultLongitude = defaultLongitude,
             hasFreshGpsFix = hasFreshGpsFix,
@@ -176,6 +189,7 @@ fun AdminApprovalAndModerationScreen(
     poiForEdit?.let { poi ->
         CreatePoiDialog(
             initialPoi = poi,
+            selectedLanguage = selectedLanguage,
             defaultLatitude = defaultLatitude,
             defaultLongitude = defaultLongitude,
             hasFreshGpsFix = hasFreshGpsFix,
@@ -209,6 +223,64 @@ fun AdminApprovalAndModerationScreen(
             selectedLanguage = selectedLanguage,
             onDismiss = { arCardForEdit = null },
             onSubmit = onUpdateArInfoCard
+        )
+    }
+
+    poiPendingDeletion?.let { poi ->
+        AlertDialog(
+            onDismissRequest = { poiPendingDeletion = null },
+            title = { Text("Xóa POI?") },
+            text = {
+                Text("Bạn sắp xóa vĩnh viễn “${poi.titleFor("vi")}” cùng các thẻ AR thuộc địa điểm này.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeletePoi(poi.id)
+                        poiPendingDeletion = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Xóa POI") }
+            },
+            dismissButton = {
+                TextButton(onClick = { poiPendingDeletion = null }) { Text("Hủy") }
+            }
+        )
+    }
+
+    arCardPendingDeletion?.let { card ->
+        AlertDialog(
+            onDismissRequest = { if (!isDeletingArCard) arCardPendingDeletion = null },
+            title = { Text("Xóa thẻ AR?") },
+            text = {
+                Column {
+                    Text("Thẻ “${card.localizations.firstOrNull { it.languageCode.equals("vi", true) }?.title ?: "AR ${card.displayOrder}"}” sẽ bị xóa khỏi POI.")
+                    if (!arCardDeleteError.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(arCardDeleteError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            isDeletingArCard = true
+                            arCardDeleteError = onDeleteArInfoCard(card.id)
+                            isDeletingArCard = false
+                            if (arCardDeleteError == null) arCardPendingDeletion = null
+                        }
+                    },
+                    enabled = !isDeletingArCard,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text(if (isDeletingArCard) "Đang xóa…" else "Xóa thẻ") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { arCardPendingDeletion = null },
+                    enabled = !isDeletingArCard
+                ) { Text("Hủy") }
+            }
         )
     }
 
@@ -276,7 +348,9 @@ private fun PoiApprovalWorkflowTab(
     onRejectClick: (AdminPoiDto) -> Unit,
     onCreateFixedArCard: (AdminPoiDto) -> Unit,
     onEditPoi: (AdminPoiDto) -> Unit,
-    onEditArCard: (AdminArInfoCardDto) -> Unit
+    onEditArCard: (AdminArInfoCardDto) -> Unit,
+    onDeletePoi: (AdminPoiDto) -> Unit,
+    onDeleteArCard: (AdminArInfoCardDto) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Role explanation banner
@@ -356,6 +430,21 @@ private fun PoiApprovalWorkflowTab(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+
+                        if (isSuperAdmin) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = { onDeletePoi(poi) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Xóa POI", fontSize = 12.sp)
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -441,7 +530,8 @@ private fun PoiApprovalWorkflowTab(
                                 ArInfoCardAdminItem(
                                     card = arCard,
                                     selectedLanguage = selectedLanguage,
-                                    onEdit = { onEditArCard(arCard) }
+                                    onEdit = { onEditArCard(arCard) },
+                                    onDelete = { onDeleteArCard(arCard) }
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
@@ -494,7 +584,8 @@ private fun PoiApprovalWorkflowTab(
 private fun ArInfoCardAdminItem(
     card: AdminArInfoCardDto,
     selectedLanguage: String,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val vi = card.localizations.firstOrNull { it.languageCode.equals("vi", true) }
     val en = card.localizations.firstOrNull { it.languageCode.equals("en", true) }
@@ -516,10 +607,19 @@ private fun ArInfoCardAdminItem(
                         Text("EN: ${en.title}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }
-                TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Sửa")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Sửa")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Xóa thẻ AR",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             }
             if (vi != null) {
@@ -1001,6 +1101,7 @@ private fun EditArInfoCardDialog(
 @Composable
 private fun CreatePoiDialog(
     initialPoi: AdminPoiDto? = null,
+    selectedLanguage: String,
     defaultLatitude: Double,
     defaultLongitude: Double,
     hasFreshGpsFix: Boolean,
@@ -1017,7 +1118,10 @@ private fun CreatePoiDialog(
     var summaryEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.shortSummary.orEmpty()) }
     var storyVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.culturalStoryMarkdown.orEmpty()) }
     var storyEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.culturalStoryMarkdown.orEmpty()) }
-    var category by remember(initialPoi?.id) { mutableStateOf(initialPoi?.category ?: "Heritage Landmark") }
+    var category by remember(initialPoi?.id) {
+        mutableStateOf(PoiCategoryLabels.normalize(initialPoi?.category))
+    }
+    var categoryMenuExpanded by remember { mutableStateOf(false) }
     var latitudeText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.latitude?.let(::formatGpsCoordinate) ?: if (hasFreshGpsFix) formatGpsCoordinate(defaultLatitude) else "") }
     var longitudeText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.longitude?.let(::formatGpsCoordinate) ?: if (hasFreshGpsFix) formatGpsCoordinate(defaultLongitude) else "") }
     var radiusText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.activationRadiusMeters?.toString() ?: "60") }
@@ -1098,28 +1202,42 @@ private fun CreatePoiDialog(
                     label = { Text("Title (English - EN)") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
-                    value = category,
-                    onValueChange = { category = it },
-                    label = { Text("Category (e.g., Ăn uống, Architecture & Heritage)") },
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    text = if (selectedLanguage.equals("en", true)) "Category" else "Danh mục",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
                 )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    AssistChip(
-                        onClick = { category = "Ăn uống" },
-                        label = { Text("Ăn uống", fontSize = 11.sp) }
-                    )
-                    AssistChip(
-                        onClick = { category = "Architecture & Heritage" },
-                        label = { Text("Di sản", fontSize = 11.sp) }
-                    )
-                    AssistChip(
-                        onClick = { category = "Historic Landmark" },
-                        label = { Text("Di tích", fontSize = 11.sp) }
-                    )
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { categoryMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = PoiCategoryLabels.label(category, selectedLanguage),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = categoryMenuExpanded,
+                        onDismissRequest = { categoryMenuExpanded = false },
+                        modifier = Modifier.fillMaxWidth(0.92f)
+                    ) {
+                        PoiCategoryLabels.values.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(PoiCategoryLabels.label(option, selectedLanguage)) },
+                                onClick = {
+                                    category = option
+                                    categoryMenuExpanded = false
+                                },
+                                trailingIcon = {
+                                    if (category == option) {
+                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(

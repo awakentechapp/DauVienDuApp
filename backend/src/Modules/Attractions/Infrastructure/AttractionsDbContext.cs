@@ -30,6 +30,10 @@ public sealed class AttractionsDbContext : DbContext
                 .HasMaxLength(64)
                 .IsRequired();
 
+            entity.Property(x => x.Category)
+                .HasMaxLength(40)
+                .IsRequired();
+
             entity.Property(x => x.Latitude)
                 .IsRequired();
 

@@ -48,6 +48,7 @@ CREATE INDEX IF NOT EXISTS "IX_refresh_tokens_user_id"
 CREATE TABLE IF NOT EXISTS attractions.points_of_interest (
     id UUID PRIMARY KEY,
     code VARCHAR(100) NOT NULL,
+    category VARCHAR(40) NOT NULL DEFAULT 'historical_site',
     latitude DOUBLE PRECISION NOT NULL,
     longitude DOUBLE PRECISION NOT NULL,
     activation_radius_meters DOUBLE PRECISION NOT NULL DEFAULT 100.0,
@@ -86,7 +87,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "UX_poi_localizations_poi_lang"
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS ar.ar_info_cards (
     id UUID PRIMARY KEY,
-    poi_id UUID NOT NULL,
+    poi_id UUID NOT NULL CONSTRAINT "FK_ar_info_cards_poi_id_points_of_interest"
+        REFERENCES attractions.points_of_interest(id) ON DELETE CASCADE,
     card_type VARCHAR(40) NOT NULL CHECK (card_type IN ('StoryHighlight', 'HistoricalFact', 'ArchitectureNote', 'DirectionHint')),
     azimuth_degrees DOUBLE PRECISION NOT NULL,
     distance_meters DOUBLE PRECISION NOT NULL,
@@ -127,6 +129,7 @@ CREATE TABLE IF NOT EXISTS media.community_photos (
     captured_longitude DOUBLE PRECISION NOT NULL,
     distance_from_poi_meters DOUBLE PRECISION NOT NULL,
     azimuth_degrees DOUBLE PRECISION NULL,
+    pitch_degrees DOUBLE PRECISION NULL,
     like_count INTEGER NOT NULL DEFAULT 0,
     report_count INTEGER NOT NULL DEFAULT 0,
     status VARCHAR(32) NOT NULL CHECK (status IN ('Published', 'Flagged', 'RemovedByModerator', 'DeletedByOwner')),

@@ -87,6 +87,20 @@ public static class CommunityMediaEndpoints
             }
 
             var caption = form["caption"].FirstOrDefault();
+            double? pitchDegrees = null;
+            var rawPitch = form["pitchDegrees"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(rawPitch))
+            {
+                if (!TryParseDouble(rawPitch, out var parsedPitch) || parsedPitch is < -90.0 or > 90.0)
+                {
+                    return ToProblemResult(Result.Failure(new Error(
+                        "PHOTO_INVALID_PITCH",
+                        "Pitch degrees must be between -90 and 90.",
+                        ErrorType.Validation)));
+                }
+
+                pitchDegrees = parsedPitch;
+            }
 
             await using var fileStream = file.OpenReadStream();
             var command = new UploadPhotoCommand(
@@ -97,6 +111,7 @@ public static class CommunityMediaEndpoints
                 CapturedLatitude: capturedLatitude,
                 CapturedLongitude: capturedLongitude,
                 AzimuthDegrees: azimuthDegrees,
+                PitchDegrees: pitchDegrees,
                 Caption: caption);
 
             var result = await mediaService.UploadPhotoAsync(command, ct);

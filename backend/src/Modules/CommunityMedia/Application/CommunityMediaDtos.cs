@@ -11,6 +11,7 @@ public sealed record CommunityPhotoDto(
     double CapturedLongitude,
     double DistanceFromPoiMeters,
     double? AzimuthDegrees,
+    double? PitchDegrees,
     int LikeCount,
     bool IsLikedByCurrentUser,
     DateTimeOffset CreatedAt);
@@ -23,6 +24,7 @@ public sealed record UploadPhotoCommand(
     double CapturedLatitude,
     double CapturedLongitude,
     double? AzimuthDegrees,
+    double? PitchDegrees,
     string? Caption);
 
 public sealed record ToggleLikeResponse(

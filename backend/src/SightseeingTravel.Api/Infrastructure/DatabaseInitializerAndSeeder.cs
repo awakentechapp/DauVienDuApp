@@ -36,6 +36,16 @@ public static class DatabaseInitializerAndSeeder
         await arDb.Database.EnsureCreatedAsync(cancellationToken);
         await mediaDb.Database.EnsureCreatedAsync(cancellationToken);
 
+        var migrationResource = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0002_PoiCategoryPhotoPoseAndArCascade.sql")
+            ?? throw new InvalidOperationException("POI category/photo pose migration resource is missing.");
+        await using (migrationResource)
+        using (var reader = new StreamReader(migrationResource))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await attractionsDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users
@@ -88,6 +98,7 @@ public static class DatabaseInitializerAndSeeder
         {
             var thapRuaResult = PointOfInterest.Create(
                 code: "POI-THAP-RUA",
+                category: PoiCategories.CulturalHeritage,
                 latitude: 21.0278,
                 longitude: 105.8523,
                 activationRadiusMeters: 120.0,
@@ -99,6 +110,7 @@ public static class DatabaseInitializerAndSeeder
 
             var pendingByAdminResult = PointOfInterest.Create(
                 code: "POI-HOANG-THANH",
+                category: PoiCategories.HistoricalSite,
                 latitude: 21.0341,
                 longitude: 105.8401,
                 activationRadiusMeters: 150.0,
@@ -205,6 +217,7 @@ public static class DatabaseInitializerAndSeeder
                     capturedLongitude: 105.8524,
                     distanceFromPoiMeters: 24.5,
                     azimuthDegrees: 95.0,
+                    pitchDegrees: 0.0,
                     createdAt: now);
 
                 samplePhoto.IncrementLike();

@@ -41,6 +41,7 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.awaken.sightseeingtravel.core.model.ArInfoCardDto
 import com.awaken.sightseeingtravel.core.model.CommunityPhotoDto
+import com.awaken.sightseeingtravel.core.model.PhotoAnchorSnapshot
 import com.awaken.sightseeingtravel.core.model.PoiArContextDto
 import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
@@ -68,8 +69,9 @@ fun ArCameraScreen(
     spatialPose: DeviceSpatialPose,
     currentUserId: String?,
     isUploadingPhoto: Boolean,
+    uploadErrorMessage: String?,
     selectedLanguage: String,
-    onCaptureAndUploadPhoto: (File, String) -> Unit,
+    onCaptureAndUploadPhoto: (File, String, PhotoAnchorSnapshot, () -> Unit) -> Unit,
     onToggleLikePhoto: (String) -> Unit,
     onReportPhoto: (String, String) -> Unit,
     onDeleteOwnPhoto: (String) -> Unit,
@@ -84,7 +86,15 @@ fun ArCameraScreen(
     var selectedCommunityPhoto by remember { mutableStateOf<CommunityPhotoDto?>(null) }
     var showCaptureDialog by remember { mutableStateOf(false) }
     var pendingCapturedFile by remember { mutableStateOf<File?>(null) }
+    var pendingCapturedPose by remember { mutableStateOf<PhotoAnchorSnapshot?>(null) }
     var photoCaptionInput by remember { mutableStateOf("") }
+
+    val discardPendingCapture = {
+        pendingCapturedFile?.delete()
+        pendingCapturedFile = null
+        pendingCapturedPose = null
+        showCaptureDialog = false
+    }
     var showReportDialogForPhotoId by remember { mutableStateOf<String?>(null) }
     var reportReasonInput by remember { mutableStateOf("") }
 
@@ -114,8 +124,7 @@ fun ArCameraScreen(
             selectedArCard = null
             selectedCommunityPhoto = null
             showCaptureDialog = false
-            pendingCapturedFile?.delete()
-            pendingCapturedFile = null
+            discardPendingCapture()
         }
     }
 
@@ -333,6 +342,12 @@ fun ArCameraScreen(
                                     imageCapture = imageCapture,
                                     onCaptured = { file ->
                                         pendingCapturedFile = file
+                                        pendingCapturedPose = PhotoAnchorSnapshot(
+                                            latitude = spatialPose.latitude,
+                                            longitude = spatialPose.longitude,
+                                            azimuthDegrees = effectiveAzimuth,
+                                            pitchDegrees = spatialPose.pitchDegrees.coerceIn(-90f, 90f)
+                                        )
                                         photoCaptionInput = ""
                                         showCaptureDialog = true
                                     }
@@ -533,7 +548,7 @@ fun ArCameraScreen(
     // ========================================================================
     if (showCaptureDialog && pendingCapturedFile != null) {
         AlertDialog(
-            onDismissRequest = { showCaptureDialog = false },
+            onDismissRequest = { if (!isUploadingPhoto) discardPendingCapture() },
             title = {
                 Text(
                     text = if (isEn) "Share Photo to 360° POI Space" else "Chia sẻ ảnh lên Không gian AR",
@@ -542,14 +557,36 @@ fun ArCameraScreen(
             },
             text = {
                 Column {
+                    AsyncImage(
+                        model = pendingCapturedFile,
+                        contentDescription = if (isEn) "Captured AR photo preview" else "Ảnh AR vừa chụp",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(210.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val capturedPose = pendingCapturedPose
                     Text(
-                        text = if (isEn) {
-                            "Your photo keeps its aspect ratio and is automatically resized to about 300 KB before upload, then stored on Contabo Object Storage at azimuth ${effectiveAzimuth.toInt()}°."
+                        text = if (capturedPose == null) {
+                            if (isEn) "AR location is unavailable." else "Không lấy được vị trí AR."
+                        } else if (isEn) {
+                            "The image keeps its aspect ratio and is resized to about 300 KB before upload. Saved anchor: ${"%.5f".format(capturedPose.latitude)}, ${"%.5f".format(capturedPose.longitude)} • heading ${capturedPose.azimuthDegrees.toInt()}° • tilt ${capturedPose.pitchDegrees.toInt()}°."
                         } else {
-                            "Ảnh được giữ nguyên tỷ lệ, tự động scale còn khoảng 300 KB trước khi tải lên Contabo Object Storage và neo tại góc hướng ${effectiveAzimuth.toInt()}°."
+                            "Ảnh được giữ nguyên tỷ lệ và scale còn khoảng 300 KB trước khi tải lên. Vị trí neo: ${"%.5f".format(capturedPose.latitude)}, ${"%.5f".format(capturedPose.longitude)} • hướng ${capturedPose.azimuthDegrees.toInt()}° • góc nghiêng ${capturedPose.pitchDegrees.toInt()}°."
                         },
                         style = MaterialTheme.typography.bodySmall
                     )
+                    if (!uploadErrorMessage.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = uploadErrorMessage,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = photoCaptionInput,
@@ -565,15 +602,25 @@ fun ArCameraScreen(
                 Button(
                     onClick = {
                         val file = pendingCapturedFile ?: return@Button
-                        showCaptureDialog = false
-                        onCaptureAndUploadPhoto(file, photoCaptionInput)
-                    }
+                        val pose = pendingCapturedPose ?: return@Button
+                        onCaptureAndUploadPhoto(file, photoCaptionInput, pose) {
+                            discardPendingCapture()
+                        }
+                    },
+                    enabled = !isUploadingPhoto && pendingCapturedPose != null
                 ) {
-                    Text(if (isEn) "Upload Photo" else "Tải ảnh lên")
+                    Text(
+                        when {
+                            isUploadingPhoto && isEn -> "Uploading…"
+                            isUploadingPhoto -> "Đang tải lên…"
+                            isEn -> "Upload Photo"
+                            else -> "Tải ảnh lên"
+                        }
+                    )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showCaptureDialog = false }) {
+                TextButton(onClick = { discardPendingCapture() }, enabled = !isUploadingPhoto) {
                     Text(if (isEn) "Cancel" else "Hủy")
                 }
             }

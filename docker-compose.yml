@@ -43,6 +43,7 @@ services:
       Jwt__Audience: "${JWT_AUDIENCE:-SightseeingTravel.Clients}"
       Jwt__SigningKey: "${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}"
       ContaboStorage__ServiceUrl: "${CONTABO_S3_SERVICE_URL:-https://sin1.contabostorage.com}"
+      ContaboStorage__AuthenticationRegion: "${CONTABO_S3_AUTH_REGION:-default}"
       ContaboStorage__BucketName: "${CONTABO_S3_BUCKET_NAME:-awakencloud}"
       ContaboStorage__PublicBaseUrl: "${CONTABO_S3_PUBLIC_BASE_URL:-https://sin1.contabostorage.com/3e270ee749cc4c6caa56fcceac2c4202:awakencloud}"
       ContaboStorage__KeyPrefix: "${CONTABO_S3_KEY_PREFIX:-dauviendu_cloud}"
