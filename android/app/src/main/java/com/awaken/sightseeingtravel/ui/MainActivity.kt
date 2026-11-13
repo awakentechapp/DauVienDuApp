@@ -48,6 +48,7 @@ import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.admin.AdminApprovalAndModerationScreen
 import com.awaken.sightseeingtravel.ui.admin.SuperAdminAccountManagementScreen
 import com.awaken.sightseeingtravel.ui.admin.ArModelLibraryDialog
+import com.awaken.sightseeingtravel.ui.admin.ArModelCreationDialog
 import com.awaken.sightseeingtravel.ui.ar.ArCameraScreen
 import com.awaken.sightseeingtravel.ui.ar.ArSelfieCaptureScreen
 import com.awaken.sightseeingtravel.ui.map.OpenFreeMapComposeView
@@ -57,7 +58,8 @@ private enum class AppDestination {
     AR_CAMERA,
     AR_SELFIE_CAMERA,
     ADMIN_CONSOLE,
-    ACCOUNT_MANAGEMENT
+    ACCOUNT_MANAGEMENT,
+    CREATE_AR_MODEL
 }
 
 /**
@@ -150,7 +152,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
 
     var currentDestination by remember { mutableStateOf(AppDestination.MAIN_TABS) }
     var accountManagementInitialRole by remember { mutableStateOf("Admin") }
-    var selectedTab by remember { mutableStateOf(MainBottomTab.EXPLORE) }
+    var selectedTab by remember { mutableStateOf(MainBottomTab.HOME) }
     var initialPlacesCategory by remember { mutableStateOf("ALL") }
     var recenterTrigger by remember { mutableIntStateOf(0) }
     var focusedPoiId by remember { mutableStateOf<String?>(null) }
@@ -187,6 +189,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
 
     LaunchedEffect(uiState.currentUser?.id) {
         if (uiState.currentUser != null) {
+            selectedTab = MainBottomTab.HOME
             permissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
@@ -283,7 +286,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                 onPlaceExistingArModel = viewModel::placeExistingArModel,
                 onUpdateArInfoCard = viewModel::updateAdminArInfoCard,
                 onDeleteArInfoCard = viewModel::deleteAdminArInfoCard,
-                onBuildArCard3dModel = viewModel::buildAdminArCard3dModel,
+                onBuildArModel = viewModel::buildAdminArModel,
                 onFilterStatusChange = { status ->
                     viewModel.loadAdminConsoleData(status)
                 },
@@ -318,6 +321,13 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                 onCreateUser = viewModel::createManagedAccount,
                 onSetUserActive = viewModel::setManagedAccountActive,
                 onBack = { currentDestination = AppDestination.MAIN_TABS }
+            )
+        }
+
+        AppDestination.CREATE_AR_MODEL -> {
+            ArModelCreationDialog(
+                onBuild = viewModel::buildAdminArModel,
+                onDismiss = { currentDestination = AppDestination.MAIN_TABS }
             )
         }
 
@@ -445,6 +455,9 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                 onOpenAdminConsole = {
                                     viewModel.loadAdminConsoleData()
                                     currentDestination = AppDestination.ADMIN_CONSOLE
+                                },
+                                onOpenArModelCreation = {
+                                    currentDestination = AppDestination.CREATE_AR_MODEL
                                 },
                                 onOpenAccountManagement = { role ->
                                     accountManagementInitialRole = role
@@ -1794,6 +1807,7 @@ private fun InfoAndProfileTabScreen(
     onSetLanguage: (String) -> Unit,
     onOpenAccountModal: () -> Unit,
     onOpenAdminConsole: () -> Unit,
+    onOpenArModelCreation: () -> Unit,
     onOpenAccountManagement: (String) -> Unit,
     onLoadArModelLibrary: suspend () -> List<ArModelLibraryItemDto>,
     onLogout: () -> Unit
@@ -1998,9 +2012,9 @@ private fun InfoAndProfileTabScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (isEn) {
-                            "Open the admin console, choose a POI and AR card, then capture the object and set its category."
+                            "Create a reusable 3D object here first, then choose it when placing an object into a POI's AR scene."
                         } else {
-                            "Mở quản trị, chọn POI và thẻ AR để chụp vật thể; tên và phân loại sẽ được lưu vào kho."
+                            "Tạo vật thể 3D độc lập tại đây trước, sau đó chọn vật thể trong kho khi đặt vào AR của POI."
                         },
                         fontSize = 12.5.sp,
                         color = BrandColors.MutedText
@@ -2008,7 +2022,7 @@ private fun InfoAndProfileTabScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = onOpenAdminConsole,
+                            onClick = onOpenArModelCreation,
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = BrandColors.Terracotta)
                         ) {

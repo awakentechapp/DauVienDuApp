@@ -163,8 +163,21 @@ interface SightseeingApiService {
         @Path("poiId") poiId: String
     ): ApiEnvelope<List<AdminArInfoCardDto>>
 
-    @GET("api/v1/admin/ar-models")
+    @GET("api/v1/admin/ar-models/catalog")
     suspend fun getAdminArModelLibrary(): Response<List<ArModelLibraryItemDto>>
+
+    @Multipart
+    @POST("api/v1/admin/ar-models/3d-model")
+    suspend fun submitArModelAsset(
+        @Part images: List<MultipartBody.Part>,
+        @Part("modelName") modelName: RequestBody,
+        @Part("modelCategory") modelCategory: RequestBody
+    ): Response<ArModelAssetBuildSubmissionDto>
+
+    @GET("api/v1/admin/ar-models/{modelId}/status")
+    suspend fun getArModelAssetStatus(
+        @Path("modelId") modelId: String
+    ): Response<ArModelAssetBuildStatusDto>
 
     @POST("api/v1/admin/pois/{poiId}/placed-ar-model")
     suspend fun placeExistingArModel(

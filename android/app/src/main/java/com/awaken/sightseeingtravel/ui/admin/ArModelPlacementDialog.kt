@@ -98,11 +98,11 @@ fun ArModelPlacementDialog(
         libraryError = null
         runCatching { onLoadLibrary() }
             .onSuccess { loaded ->
-                library = loaded
-                selectedModel = loaded.firstOrNull()
-                modelName = loaded.firstOrNull()?.name.orEmpty()
-                loaded.firstOrNull()?.let { modelHeadingDegrees = normalizeHeading(it.modelRotationDegrees) }
-                if (loaded.isEmpty()) libraryError = "Kho chưa có mô hình 3D. Hãy dựng mô hình từ thẻ AR trước."
+                library = loaded.filter { it.status.equals("Ready", true) && !it.modelUrl.isNullOrBlank() }
+                selectedModel = library.firstOrNull()
+                modelName = library.firstOrNull()?.name.orEmpty()
+                library.firstOrNull()?.let { modelHeadingDegrees = normalizeHeading(it.modelRotationDegrees) }
+                if (library.isEmpty()) libraryError = "Kho chưa có vật thể 3D sẵn sàng. Hãy tạo vật thể riêng trong trang Thông tin trước."
             }
             .onFailure { libraryError = it.localizedMessage ?: "Không thể tải kho vật thể 3D." }
         isLoadingLibrary = false
@@ -117,7 +117,8 @@ fun ArModelPlacementDialog(
         childNodes.clear()
         val item = selectedModel ?: return@LaunchedEffect
         isLoadingModel = true
-        runCatching { modelLoader.loadModelInstance(item.modelUrl) }
+        val modelUrl = item.modelUrl ?: return@LaunchedEffect
+        runCatching { modelLoader.loadModelInstance(modelUrl) }
             .onSuccess { modelInstance = it }
             .onFailure { placementError = it.localizedMessage ?: "Không thể tải mô hình 3D đã chọn." }
         isLoadingModel = false
@@ -349,7 +350,7 @@ fun ArModelPlacementDialog(
                                         Column {
                                             Text(item.name, fontWeight = FontWeight.SemiBold)
                                             Text(
-                                                "${modelCategoryLabel(item.category, false)} • POI ${item.sourcePoiId.take(8)}",
+                                                modelCategoryLabel(item.category, false),
                                                 style = MaterialTheme.typography.bodySmall
                                             )
                                         }
@@ -418,7 +419,8 @@ fun ArModelPlacementDialog(
                                     azimuthDegrees = point.azimuthDegrees,
                                     distanceMeters = point.distanceMeters,
                                     elevationMeters = point.elevationMeters,
-                                    modelRotationDegrees = normalizeHeading(modelHeadingDegrees)
+                                    modelRotationDegrees = normalizeHeading(modelHeadingDegrees),
+                                    sourceModelId = item.sourceModelId
                                 )
                                 scope.launch {
                                     val error = runCatching { onSave(request) }

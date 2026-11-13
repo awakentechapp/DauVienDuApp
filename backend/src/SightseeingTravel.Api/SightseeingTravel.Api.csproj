@@ -25,6 +25,7 @@
     <EmbeddedResource Include="Migrations/0004_ArCardModelPlacement.sql" />
     <EmbeddedResource Include="Migrations/0005_ArModelCatalogMetadata.sql" />
     <EmbeddedResource Include="Migrations/0006_IdentityPasswordReset.sql" />
+    <EmbeddedResource Include="Migrations/0007_ArModelAssets.sql" />
   </ItemGroup>
 
   <ItemGroup>

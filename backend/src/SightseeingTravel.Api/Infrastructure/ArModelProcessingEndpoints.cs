@@ -68,6 +68,54 @@ public static class ArModelProcessingEndpoints
                     card.ModelCategory.ToString()));
         });
 
+        var modelLibraryGroup = app.MapGroup("/api/v1/admin/ar-models")
+            .RequireAuthorization(AuthPolicies.AdminOrSuperAdmin)
+            .WithTags("Admin - 3D Object Library");
+
+        modelLibraryGroup.MapPost("/3d-model", async (
+                HttpRequest request,
+                IArModelTaskSubmissionService taskSubmissionService,
+                CancellationToken cancellationToken) =>
+            {
+                var form = await request.ReadFormAsync(cancellationToken);
+                var modelId = Guid.NewGuid();
+                var result = await taskSubmissionService.SubmitLibraryAssetAsync(
+                    modelId,
+                    form.Files.ToArray(),
+                    form["modelName"].ToString(),
+                    form["modelCategory"].ToString(),
+                    cancellationToken);
+
+                return result.Success
+                    ? Results.Json(new { modelId, status = result.Status, message = result.Message },
+                        statusCode: result.StatusCode)
+                    : Results.Json(new { code = "AR_MODEL_BUILD_FAILED", message = result.Message },
+                        statusCode: result.StatusCode);
+            })
+            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBytes))
+            .DisableAntiforgery();
+
+        modelLibraryGroup.MapGet("/{modelId:guid}/status", async (
+            Guid modelId,
+            ArExperienceDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var asset = await dbContext.ArModelAssets
+                .AsNoTracking()
+                .Where(x => x.Id == modelId)
+                .Select(x => new { x.Id, x.ModelStatus, x.ModelError, x.Name, x.Category })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return asset is null
+                ? Results.NotFound(new { code = "AR_MODEL_NOT_FOUND", message = "Không tìm thấy vật thể 3D." })
+                : Results.Ok(new ArModelAssetBuildStatusResponse(
+                    asset.Id,
+                    asset.ModelStatus,
+                    asset.ModelError,
+                    asset.Name,
+                    asset.Category.ToString()));
+        });
+
         return app;
     }
 }

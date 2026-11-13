@@ -5,10 +5,6 @@ import android.net.Uri
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,7 +22,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,7 +60,7 @@ fun AdminApprovalAndModerationScreen(
     onPlaceExistingArModel: suspend (String, PlaceArModelRequest) -> String?,
     onUpdateArInfoCard: suspend (String, UpsertArInfoCardRequest) -> String?,
     onDeleteArInfoCard: suspend (String) -> String?,
-    onBuildArCard3dModel: suspend (String, List<File>, String, String) -> String?,
+    onBuildArModel: suspend (List<File>, String, String) -> String?,
     onFilterStatusChange: (String?) -> Unit,
     onCreatePoiSubmit: (CreateOrUpdatePoiRequest, Uri?) -> Unit,
     onUpdatePoiSubmit: (String, CreateOrUpdatePoiRequest, Uri?) -> Unit,
@@ -89,27 +84,8 @@ fun AdminApprovalAndModerationScreen(
     var arCardPendingDeletion by remember { mutableStateOf<AdminArInfoCardDto?>(null) }
     var arCardDeleteError by remember { mutableStateOf<String?>(null) }
     var isDeletingArCard by remember { mutableStateOf(false) }
-    var arCardFor3dModel by remember { mutableStateOf<AdminArInfoCardDto?>(null) }
-    val arModelCaptureFiles = remember { mutableStateListOf<File>() }
-    var arModelCaptureError by remember { mutableStateOf<String?>(null) }
-    var isSubmittingArModel by remember { mutableStateOf(false) }
-    var isTakingArModelPhoto by remember { mutableStateOf(false) }
-    var isArModelCameraActive by remember { mutableStateOf(false) }
-    var arModelImageCapture by remember { mutableStateOf<ImageCapture?>(null) }
-    var arModelCameraSessionError by remember { mutableStateOf<String?>(null) }
-    var arModelName by remember(arCardFor3dModel?.id) {
-        mutableStateOf(
-            arCardFor3dModel?.modelName?.takeIf { it.isNotBlank() }
-                ?: arCardFor3dModel?.localizations
-                ?.firstOrNull { it.languageCode.equals("vi", ignoreCase = true) }
-                ?.title.orEmpty()
-        )
-    }
-    var arModelCategory by remember(arCardFor3dModel?.id) {
-        mutableStateOf(arCardFor3dModel?.modelCategory?.takeIf { it in setOf("Food", "Object") } ?: "Object")
-    }
+    var showArModelCreationDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     var hasCameraPermission by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
@@ -122,12 +98,8 @@ fun AdminApprovalAndModerationScreen(
             if (placementPoi != null) {
                 poiWaitingForModelCameraPermission = null
                 poiForModelPlacement = placementPoi
-            } else {
-                arModelCameraSessionError = null
-                isArModelCameraActive = true
             }
         } else {
-            arModelCameraSessionError = "Cần cấp quyền camera để chụp ảnh dựng vật thể 3D."
             if (poiWaitingForModelCameraPermission != null) {
                 poiWaitingForModelCameraPermission = null
                 modelPlacementPermissionError = true
@@ -141,91 +113,6 @@ fun AdminApprovalAndModerationScreen(
         } else {
             poiWaitingForModelCameraPermission = poi
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-        }
-    }
-
-    DisposableEffect(arCardFor3dModel?.id, isArModelCameraActive, hasCameraPermission, lifecycleOwner) {
-        var disposed = false
-        var cameraProvider: ProcessCameraProvider? = null
-        var activeImageCapture: ImageCapture? = null
-
-        if (arCardFor3dModel != null && isArModelCameraActive && hasCameraPermission) {
-            val providerFuture = ProcessCameraProvider.getInstance(context)
-            providerFuture.addListener({
-                if (!disposed) {
-                    try {
-                        cameraProvider = providerFuture.get()
-                        val imageCapture = ImageCapture.Builder()
-                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                            .setJpegQuality(95)
-                            .build()
-                        activeImageCapture = imageCapture
-                        cameraProvider?.unbindAll()
-                        cameraProvider?.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            imageCapture
-                        )
-                        arModelImageCapture = imageCapture
-                        arModelCameraSessionError = null
-                    } catch (error: Exception) {
-                        arModelImageCapture = null
-                        arModelCameraSessionError = error.localizedMessage ?: "Không thể khởi động camera trong app."
-                    }
-                }
-            }, ContextCompat.getMainExecutor(context))
-        } else {
-            arModelImageCapture = null
-        }
-
-        onDispose {
-            disposed = true
-            runCatching { activeImageCapture?.let { cameraProvider?.unbind(it) } }
-            arModelImageCapture = null
-        }
-    }
-
-    val takeArModelPhoto = {
-        val imageCapture = arModelImageCapture
-        if (imageCapture == null || isTakingArModelPhoto || arModelCaptureFiles.size >= 32) {
-            arModelCameraSessionError = "Camera chưa sẵn sàng hoặc đã đủ 32 ảnh."
-        } else {
-            try {
-                val captureDirectory = File(context.cacheDir, "ar-model-captures").apply { mkdirs() }
-                val file = File.createTempFile("ar-model-", ".jpg", captureDirectory)
-                isTakingArModelPhoto = true
-                val outputOptions = ImageCapture.OutputFileOptions.Builder(file).build()
-                imageCapture.takePicture(
-                    outputOptions,
-                    ContextCompat.getMainExecutor(context),
-                    object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                            isTakingArModelPhoto = false
-                            if (arCardFor3dModel != null && file.length() > 0L) {
-                                arModelCaptureFiles.add(file)
-                                arModelCaptureError = null
-                                arModelCameraSessionError = null
-                            } else {
-                                file.delete()
-                            }
-                        }
-
-                        override fun onError(exception: ImageCaptureException) {
-                            isTakingArModelPhoto = false
-                            file.delete()
-                            arModelCameraSessionError = exception.localizedMessage ?: "Chụp ảnh thất bại. Hãy thử lại."
-                        }
-                    }
-                )
-            } catch (error: Exception) {
-                isTakingArModelPhoto = false
-                arModelCameraSessionError = error.localizedMessage ?: "Không thể chụp ảnh."
-            }
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose {
-            arModelCaptureFiles.forEach { it.delete() }
         }
     }
 
@@ -252,6 +139,15 @@ fun AdminApprovalAndModerationScreen(
                     }
                 },
                 actions = {
+                    OutlinedButton(
+                        onClick = { showArModelCreationDialog = true },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Tạo vật thể 3D", fontSize = 12.sp, maxLines = 1)
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
                     Button(
                         onClick = { showCreatePoiDialog = true },
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
@@ -307,12 +203,6 @@ fun AdminApprovalAndModerationScreen(
                     onPlace3dModel = startModelPlacement,
                     onEditPoi = { poi -> poiForEdit = poi },
                     onEditArCard = { card -> arCardForEdit = card },
-                    onBuildArModel = { card ->
-                        arModelCaptureFiles.forEach { it.delete() }
-                        arModelCaptureFiles.clear()
-                        arModelCaptureError = null
-                        arCardFor3dModel = card
-                    },
                     onDeletePoi = { poi -> poiPendingDeletion = poi },
                     onDeleteArCard = { card ->
                         arCardDeleteError = null
@@ -412,142 +302,10 @@ fun AdminApprovalAndModerationScreen(
         )
     }
 
-    arCardFor3dModel?.let { card ->
-        AlertDialog(
-            onDismissRequest = {
-                if (!isSubmittingArModel) {
-                    arModelCaptureFiles.forEach { it.delete() }
-                    arModelCaptureFiles.clear()
-                    isArModelCameraActive = false
-                    arCardFor3dModel = null
-                }
-            },
-            title = { Text("Tạo vật thể 3D cho thẻ AR") },
-            text = {
-                Column(
-                    modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = arModelName,
-                        onValueChange = { arModelName = it.take(200) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Tên vật thể") },
-                        singleLine = true,
-                        enabled = !isSubmittingArModel
-                    )
-                    Text("Phân loại vật thể", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = arModelCategory == "Food",
-                            onClick = { arModelCategory = "Food" },
-                            enabled = !isSubmittingArModel,
-                            label = { Text("Món ăn") }
-                        )
-                        FilterChip(
-                            selected = arModelCategory == "Object",
-                            onClick = { arModelCategory = "Object" },
-                            enabled = !isSubmittingArModel,
-                            label = { Text("Vật dụng") }
-                        )
-                    }
-                    Text("Chụp nhiều góc để dựng vật thể 3D")
-                    Text("Chụp một vòng quanh vật thể ở nhiều góc độ. Màn hình không hiển thị ảnh preview; camera chụp liên tục ngay trong app.")
-                    Text("Máy chủ sẽ tự động dùng AI tách nền khi dựng 3D. Tính năng tách nền đang ở mức thử nghiệm, nên nền đơn giản và tương phản với vật thể sẽ cho kết quả tốt hơn.", style = MaterialTheme.typography.bodySmall)
-                    Text("${arModelCaptureFiles.size}/32 ảnh", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text("Vật thể cần đứng yên, đủ sáng; tránh rung, người đi lại và bề mặt phản chiếu.", style = MaterialTheme.typography.bodySmall)
-                    if (!isArModelCameraActive) {
-                        Button(
-                            onClick = {
-                                if (hasCameraPermission) {
-                                    arModelCameraSessionError = null
-                                    isArModelCameraActive = true
-                                } else {
-                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                }
-                            },
-                            enabled = !isSubmittingArModel
-                        ) { Text(if (hasCameraPermission) "Bật camera trong app" else "Cấp quyền và bật camera") }
-                    } else if (arModelImageCapture == null) {
-                        if (arModelCameraSessionError == null) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                Text("Đang khởi động camera…")
-                            }
-                        } else {
-                            OutlinedButton(onClick = { isArModelCameraActive = false }) {
-                                Text("Quay lại để thử mở camera")
-                            }
-                        }
-                    } else if (arModelImageCapture != null) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                onClick = takeArModelPhoto,
-                                enabled = !isSubmittingArModel && !isTakingArModelPhoto && arModelCaptureFiles.size < 32
-                            ) {
-                                if (isTakingArModelPhoto) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                }
-                                Text(if (isTakingArModelPhoto) "Đang chụp…" else "Chụp ảnh tiếp")
-                            }
-                            TextButton(
-                                onClick = { arModelCaptureFiles.removeLastOrNull()?.delete() },
-                                enabled = !isSubmittingArModel && !isTakingArModelPhoto && arModelCaptureFiles.isNotEmpty()
-                            ) { Text("Bỏ ảnh cuối") }
-                        }
-                    }
-                    if (!arModelCameraSessionError.isNullOrBlank()) {
-                        Text(arModelCameraSessionError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    }
-                    if (!arModelCaptureError.isNullOrBlank()) {
-                        Text(arModelCaptureError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    }
-                    if (isSubmittingArModel) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Text("Đang tải ảnh lên máy chủ…")
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                if (arModelCaptureFiles.size >= 12) {
-                    Button(
-                        onClick = {
-                            isArModelCameraActive = false
-                            scope.launch {
-                                isSubmittingArModel = true
-                                arModelCaptureError = onBuildArCard3dModel(
-                                    card.id,
-                                    arModelCaptureFiles.toList(),
-                                    arModelName.trim(),
-                                    arModelCategory
-                                )
-                                isSubmittingArModel = false
-                                if (arModelCaptureError == null) {
-                                    arModelCaptureFiles.forEach { it.delete() }
-                                    arModelCaptureFiles.clear()
-                                    arCardFor3dModel = null
-                                }
-                            }
-                        },
-                        enabled = !isSubmittingArModel && !isTakingArModelPhoto &&
-                            arModelName.isNotBlank() && arModelCategory in setOf("Food", "Object")
-                    ) { Text("Ghép ảnh dựng vật thể 3D") }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        arModelCaptureFiles.forEach { it.delete() }
-                        arModelCaptureFiles.clear()
-                        isArModelCameraActive = false
-                        arCardFor3dModel = null
-                    },
-                    enabled = !isSubmittingArModel
-                ) { Text("Hủy") }
-            }
+    if (showArModelCreationDialog) {
+        ArModelCreationDialog(
+            onBuild = onBuildArModel,
+            onDismiss = { showArModelCreationDialog = false }
         )
     }
 
@@ -675,7 +433,6 @@ private fun PoiApprovalWorkflowTab(
     onPlace3dModel: (AdminPoiDto) -> Unit,
     onEditPoi: (AdminPoiDto) -> Unit,
     onEditArCard: (AdminArInfoCardDto) -> Unit,
-    onBuildArModel: (AdminArInfoCardDto) -> Unit,
     onDeletePoi: (AdminPoiDto) -> Unit,
     onDeleteArCard: (AdminArInfoCardDto) -> Unit
 ) {
@@ -869,8 +626,7 @@ private fun PoiApprovalWorkflowTab(
                                     card = arCard,
                                     selectedLanguage = selectedLanguage,
                                     onEdit = { onEditArCard(arCard) },
-                                    onDelete = { onDeleteArCard(arCard) },
-                                    onBuildModel = { onBuildArModel(arCard) }
+                                    onDelete = { onDeleteArCard(arCard) }
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
@@ -924,8 +680,7 @@ private fun ArInfoCardAdminItem(
     card: AdminArInfoCardDto,
     selectedLanguage: String,
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onBuildModel: () -> Unit
+    onDelete: () -> Unit
 ) {
     val vi = card.localizations.firstOrNull { it.languageCode.equals("vi", true) }
     val en = card.localizations.firstOrNull { it.languageCode.equals("en", true) }
@@ -981,12 +736,7 @@ private fun ArInfoCardAdminItem(
                     "failed" -> "Dựng 3D thất bại${card.modelError?.let { ": $it" }.orEmpty()}"
                     else -> "Chưa có vật thể 3D"
                 }
-                Text(modelStatusLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                TextButton(onClick = onBuildModel, enabled = !card.modelStatus.equals("Processing", true)) {
-                    Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (card.modelStatus.equals("Ready", true)) "Dựng lại" else "Tạo 3D")
-                }
+                Text(modelStatusLabel, style = MaterialTheme.typography.labelSmall)
             }
             if (!card.modelName.isNullOrBlank()) {
                 Text(

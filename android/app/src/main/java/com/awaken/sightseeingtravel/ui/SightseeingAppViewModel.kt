@@ -970,8 +970,11 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
 
     private fun appendNewPhotoToState(newPhoto: CommunityPhotoDto) {
         _uiState.update { state ->
-            val updatedGallery = listOf(newPhoto) + state.poiCommunityPhotos
-            val updatedTop10 = updatedGallery.sortedByDescending { it.likeCount }.take(10)
+            // Always surface the just-uploaded photo immediately, even when older photos have more likes.
+            val updatedGallery = listOf(newPhoto) + state.poiCommunityPhotos.filterNot { it.id == newPhoto.id }
+            val existingHighlights = state.activeArContext?.highlightedCommunityPhotos
+                ?: state.selectedPoiDetail?.highlightedCommunityPhotos.orEmpty()
+            val updatedTop10 = (listOf(newPhoto) + existingHighlights.filterNot { it.id == newPhoto.id }).take(10)
             state.copy(
                 poiCommunityPhotos = updatedGallery,
                 selectedPoiDetail = state.selectedPoiDetail?.copy(
@@ -1439,6 +1442,61 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             throw error
         } catch (error: Exception) {
             error.message ?: "Không thể gửi ảnh để dựng mô hình 3D."
+        }
+    }
+
+    suspend fun buildAdminArModel(
+        imageFiles: List<File>,
+        modelName: String,
+        modelCategory: String
+    ): String? {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            return "Chỉ tài khoản Admin hoặc Super Admin mới được tạo vật thể AR 3D."
+        }
+        if (modelName.isBlank() || modelName.length > 200) {
+            return "Tên vật thể phải có từ 1 đến 200 ký tự."
+        }
+        if (modelCategory !in setOf("Food", "Object")) {
+            return "Hãy chọn phân loại Món ăn hoặc Vật dụng."
+        }
+        if (imageFiles.size !in 12..32) {
+            return "Cần chụp từ 12 đến 32 ảnh trước khi dựng mô hình."
+        }
+        if (imageFiles.sumOf { it.length() } > 120L * 1024 * 1024) {
+            return "Tổng dung lượng ảnh vượt 120 MB. Hãy chụp lại ở độ phân giải thấp hơn."
+        }
+        if (imageFiles.any { !it.exists() || it.length() == 0L }) {
+            return "Một số ảnh chụp không còn hợp lệ. Hãy chụp lại các ảnh đó."
+        }
+
+        return try {
+            val imageParts = imageFiles.map { image ->
+                val mediaType = if (image.extension.equals("png", ignoreCase = true)) {
+                    "image/png".toMediaTypeOrNull()
+                } else {
+                    "image/jpeg".toMediaTypeOrNull()
+                }
+                MultipartBody.Part.createFormData("images", image.name, image.asRequestBody(mediaType))
+            }
+            val textPlain = "text/plain".toMediaTypeOrNull()
+            val response = apiService.submitArModelAsset(
+                imageParts,
+                modelName.trim().toRequestBody(textPlain),
+                modelCategory.toRequestBody(textPlain)
+            )
+            if (!response.isSuccessful) {
+                return "Không gửi được ảnh để tạo vật thể 3D (HTTP ${response.code()})."
+            }
+            val body = response.body()
+                ?: return "Máy chủ đã nhận yêu cầu nhưng không trả về trạng thái dựng mô hình."
+            _uiState.update {
+                it.copy(statusBannerMessage = body.message)
+            }
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.message ?: "Không thể gửi ảnh để tạo vật thể 3D."
         }
     }
 

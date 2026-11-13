@@ -63,6 +63,16 @@ public static class ArExperienceEndpoints
                 : ToErrorResult(result.Error);
         });
 
+        adminGroup.MapGet("/ar-models/catalog", async (
+            IArExperienceService arExperienceService,
+            CancellationToken ct) =>
+        {
+            var result = await arExperienceService.GetArModelCatalogAsync(ct);
+            return result.IsSuccess
+                ? Results.Ok(result.Value)
+                : ToErrorResult(result.Error);
+        });
+
         adminGroup.MapPost("/pois/{poiId:guid}/placed-ar-model", async (
             Guid poiId,
             [FromBody] PlaceArModelRequest request,

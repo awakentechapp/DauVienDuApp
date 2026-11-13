@@ -163,6 +163,15 @@ public sealed class ArExperienceService : IArExperienceService
 
     public async Task<Result<IReadOnlyList<ArModelLibraryItemDto>>> GetArModelLibraryAsync(
         CancellationToken ct = default)
+        => await GetArModelAssetsAsync(readyOnly: true, ct);
+
+    public async Task<Result<IReadOnlyList<ArModelLibraryItemDto>>> GetArModelCatalogAsync(
+        CancellationToken ct = default)
+        => await GetArModelAssetsAsync(readyOnly: false, ct);
+
+    private async Task<Result<IReadOnlyList<ArModelLibraryItemDto>>> GetArModelAssetsAsync(
+        bool readyOnly,
+        CancellationToken ct)
     {
         if (_objectStorageService is null)
         {
@@ -172,31 +181,25 @@ public sealed class ArExperienceService : IArExperienceService
                 ErrorType.Failure));
         }
 
-        var cards = await _dbContext.ArInfoCards
+        var assets = await _dbContext.ArModelAssets
             .AsNoTracking()
-            .Include(x => x.Localizations)
-            .Where(x => x.ModelStatus == "Ready" && x.ModelObjectKey != null)
-            .OrderBy(x => x.CreatedAt)
+            .Where(x => !readyOnly || (x.ModelStatus == "Ready" && x.ModelObjectKey != null))
+            .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(ct);
 
-        var uniqueModelCards = cards
-            .Where(x => !string.IsNullOrWhiteSpace(x.ModelObjectKey))
-            .GroupBy(x => x.ModelObjectKey!, StringComparer.Ordinal)
-            .Select(group => group.OrderByDescending(x => x.CreatedAt).First());
-        var items = uniqueModelCards
-            .Select(card => new ArModelLibraryItemDto(
-                card.Id,
-                card.PoiId,
-                string.IsNullOrWhiteSpace(card.ModelName)
-                    ? card.Localizations
-                    .OrderByDescending(x => string.Equals(x.LanguageCode, SupportedLanguages.Vietnamese, StringComparison.OrdinalIgnoreCase))
-                    .ThenBy(x => x.LanguageCode)
-                    .Select(x => x.Title)
-                    .FirstOrDefault() ?? "Vật thể 3D"
-                    : card.ModelName,
-                _objectStorageService.CreateReadUrl(card.ModelObjectKey!),
-                card.ModelRotationDegrees,
-                card.ModelCategory.ToString()))
+        var items = assets
+            .Select(asset => new ArModelLibraryItemDto(
+                asset.Id,
+                Guid.Empty,
+                asset.Name,
+                asset.ModelStatus == "Ready" && !string.IsNullOrWhiteSpace(asset.ModelObjectKey)
+                    ? _objectStorageService.CreateReadUrl(asset.ModelObjectKey)
+                    : null,
+                asset.ModelRotationDegrees,
+                asset.Category.ToString(),
+                asset.Id,
+                asset.ModelStatus,
+                asset.ModelError))
             .ToList();
 
         return Result.Success<IReadOnlyList<ArModelLibraryItemDto>>(items);
@@ -231,12 +234,24 @@ public sealed class ArExperienceService : IArExperienceService
                 ErrorType.Failure));
         }
 
-        var sourceCard = await _dbContext.ArInfoCards
+        var sourceModelId = request.SourceModelId ?? request.SourceCardId;
+        var sourceAsset = await _dbContext.ArModelAssets
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                x => x.Id == request.SourceCardId && x.ModelStatus == "Ready" && x.ModelObjectKey != null,
+                x => x.Id == sourceModelId && x.ModelStatus == "Ready" && x.ModelObjectKey != null,
                 ct);
-        if (sourceCard is null || string.IsNullOrWhiteSpace(sourceCard.ModelObjectKey))
+
+        // Accept sourceCardId for older app versions while new releases use the independent catalog.
+        var legacyCard = sourceAsset is null
+            ? await _dbContext.ArInfoCards
+                .AsNoTracking()
+                .Include(x => x.Localizations)
+                .FirstOrDefaultAsync(
+                    x => x.Id == request.SourceCardId && x.ModelStatus == "Ready" && x.ModelObjectKey != null,
+                    ct)
+            : null;
+        var modelObjectKey = sourceAsset?.ModelObjectKey ?? legacyCard?.ModelObjectKey;
+        if (string.IsNullOrWhiteSpace(modelObjectKey))
         {
             return Result.Failure<AdminArInfoCardDto>(new Error(
                 "AR_MODEL_LIBRARY_ITEM_NOT_FOUND",
@@ -266,15 +281,17 @@ public sealed class ArExperienceService : IArExperienceService
         }
 
         var card = createResult.Value;
+        var modelName = sourceAsset?.Name ?? legacyCard?.ModelName ?? legacyCard?.Localizations
+            .OrderByDescending(x => string.Equals(x.LanguageCode, SupportedLanguages.Vietnamese, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(x => x.LanguageCode)
+            .Select(x => x.Title)
+            .FirstOrDefault();
+        var modelCategory = sourceAsset?.Category ?? legacyCard?.ModelCategory ?? ArModelCategory.Object;
         var modelResult = card.AttachExistingModel(
-            sourceCard.ModelObjectKey,
+            modelObjectKey,
             request.ModelRotationDegrees,
-            sourceCard.ModelName ?? sourceCard.Localizations
-                .OrderByDescending(x => string.Equals(x.LanguageCode, SupportedLanguages.Vietnamese, StringComparison.OrdinalIgnoreCase))
-                .ThenBy(x => x.LanguageCode)
-                .Select(x => x.Title)
-                .FirstOrDefault(),
-            sourceCard.ModelCategory,
+            modelName,
+            modelCategory,
             nowUtc);
         if (modelResult.IsFailure)
         {

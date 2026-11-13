@@ -86,6 +86,16 @@ public static class DatabaseInitializerAndSeeder
             await identityDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
         }
 
+        var arModelAssetsMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0007_ArModelAssets.sql")
+            ?? throw new InvalidOperationException("AR model assets migration resource is missing.");
+        await using (arModelAssetsMigration)
+        using (var reader = new StreamReader(arModelAssetsMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users

@@ -31,6 +31,13 @@ public sealed record ArModelBuildStatusResponse(
     string? ModelName = null,
     string ModelCategory = "Object");
 
+public sealed record ArModelAssetBuildStatusResponse(
+    Guid ModelId,
+    string Status,
+    string? ErrorMessage,
+    string Name,
+    string Category);
+
 public sealed record ArModelBuildSubmissionResult(
     bool Success,
     int StatusCode,
@@ -41,6 +48,13 @@ public interface IArModelTaskSubmissionService
 {
     Task<ArModelBuildSubmissionResult> SubmitAsync(
         Guid cardId,
+        IReadOnlyList<IFormFile> images,
+        string modelName,
+        string modelCategory,
+        CancellationToken cancellationToken);
+
+    Task<ArModelBuildSubmissionResult> SubmitLibraryAssetAsync(
+        Guid modelId,
         IReadOnlyList<IFormFile> images,
         string modelName,
         string modelCategory,
@@ -191,6 +205,123 @@ public sealed class ArModelTaskSubmissionService : IArModelTaskSubmissionService
         }
     }
 
+    public async Task<ArModelBuildSubmissionResult> SubmitLibraryAssetAsync(
+        Guid modelId,
+        IReadOnlyList<IFormFile> images,
+        string modelName,
+        string modelCategory,
+        CancellationToken cancellationToken)
+    {
+        if (!_options.Enabled)
+            return Failure(StatusCodes.Status503ServiceUnavailable, "Dịch vụ dựng mô hình 3D chưa được bật.");
+        if (modelId == Guid.Empty)
+            return Failure(StatusCodes.Status400BadRequest, "Mã vật thể 3D không hợp lệ.");
+
+        var normalizedName = modelName.Trim();
+        if (normalizedName.Length is 0 or > 200)
+            return Failure(StatusCodes.Status400BadRequest, "Tên vật thể phải có từ 1 đến 200 ký tự.");
+
+        var category = modelCategory.Trim().ToLowerInvariant() switch
+        {
+            "food" => ArModelCategory.Food,
+            "object" => ArModelCategory.Object,
+            _ => (ArModelCategory?)null
+        };
+        if (category is null)
+            return Failure(StatusCodes.Status400BadRequest, "Phân loại vật thể không hợp lệ.");
+        if (images.Count < _options.MinImages || images.Count > _options.MaxImages)
+            return Failure(StatusCodes.Status400BadRequest,
+                $"Cần chụp từ {_options.MinImages} đến {_options.MaxImages} ảnh cho một mô hình 3D.");
+        if (images.Any(image => image.Length <= 0 ||
+                                !(image.ContentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+                                  image.ContentType.Equals("image/png", StringComparison.OrdinalIgnoreCase))))
+            return Failure(StatusCodes.Status400BadRequest, "Ảnh đầu vào phải là JPEG hoặc PNG hợp lệ.");
+        if (images.Sum(image => image.Length) > _options.MaxUploadBytes)
+            return Failure(StatusCodes.Status413PayloadTooLarge, "Tổng dung lượng ảnh vượt giới hạn cho phép.");
+
+        var (taskId, failure) = await SubmitNodeOdmTaskAsync(
+            images,
+            $"ar-model-{modelId:N}",
+            cancellationToken);
+        if (failure is not null)
+            return failure;
+
+        var asset = ArModelAsset.Create(modelId, normalizedName, category.Value, taskId!, DateTimeOffset.UtcNow);
+        _dbContext.ArModelAssets.Add(asset);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return new ArModelBuildSubmissionResult(
+            true,
+            StatusCodes.Status202Accepted,
+            "Đã nhận ảnh. Vật thể 3D đang được dựng trên máy chủ.",
+            "Processing");
+    }
+
+    private async Task<(string? TaskId, ArModelBuildSubmissionResult? Failure)> SubmitNodeOdmTaskAsync(
+        IReadOnlyList<IFormFile> images,
+        string taskName,
+        CancellationToken cancellationToken)
+    {
+        using var multipart = new MultipartFormDataContent();
+        foreach (var image in images)
+        {
+            var streamContent = new StreamContent(image.OpenReadStream());
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue(image.ContentType);
+            multipart.Add(streamContent, "images", Path.GetFileName(image.FileName));
+        }
+        multipart.Add(new StringContent(taskName), "name");
+        multipart.Add(new StringContent(
+            "[{\"name\":\"gltf\",\"value\":true},{\"name\":\"bg-removal\",\"value\":true}]"),
+            "options");
+        multipart.Add(new StringContent("[\"odm_texturing/odm_textured_model_geo.glb\"]"), "outputs");
+
+        var client = _httpClientFactory.CreateClient("NodeOdm");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync(BuildNodeOdmUri("task/new"), multipart, cancellationToken);
+        }
+        catch (HttpRequestException exception)
+        {
+            _logger.LogWarning(exception, "NodeODM is unreachable while submitting 3D asset {TaskName}.", taskName);
+            return (null, Failure(StatusCodes.Status503ServiceUnavailable, "Worker dựng mô hình 3D hiện chưa kết nối được."));
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(exception, "NodeODM timed out while submitting 3D asset {TaskName}.", taskName);
+            return (null, Failure(StatusCodes.Status503ServiceUnavailable, "Worker dựng mô hình 3D phản hồi quá thời gian."));
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var nodeError = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("NodeODM rejected 3D asset {TaskName}. HTTP {StatusCode}; response: {Response}",
+                    taskName,
+                    (int)response.StatusCode,
+                    nodeError.Length > 500 ? nodeError[..500] : nodeError);
+                return (null, Failure(StatusCodes.Status502BadGateway, "Worker dựng mô hình 3D không nhận được ảnh."));
+            }
+
+            try
+            {
+                using var responseJson = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+                var taskId = responseJson.RootElement.TryGetProperty("uuid", out var uuidElement)
+                    ? uuidElement.GetString()
+                    : null;
+                return string.IsNullOrWhiteSpace(taskId)
+                    ? (null, Failure(StatusCodes.Status502BadGateway, "Worker không trả về mã tác vụ dựng mô hình."))
+                    : (taskId, null);
+            }
+            catch (JsonException exception)
+            {
+                _logger.LogWarning(exception, "NodeODM returned invalid task metadata for 3D asset {TaskName}.", taskName);
+                return (null, Failure(StatusCodes.Status502BadGateway, "Worker trả về trạng thái tác vụ không hợp lệ."));
+            }
+        }
+    }
+
     private Uri BuildNodeOdmUri(string path)
     {
         var uri = new Uri(new Uri(_options.NodeOdmUrl.TrimEnd('/') + "/"), path);
@@ -275,6 +406,120 @@ public sealed class ArModelProcessingWorker : BackgroundService
             cancellationToken.ThrowIfCancellationRequested();
             await CheckTaskAsync(dbContext, task.Id, task.TaskId, cancellationToken);
         }
+
+        var assetTasks = await dbContext.ArModelAssets
+            .AsNoTracking()
+            .Where(asset => asset.ModelStatus == "Processing" && asset.NodeOdmTaskId != null)
+            .Select(asset => new { asset.Id, TaskId = asset.NodeOdmTaskId! })
+            .Take(4)
+            .ToListAsync(cancellationToken);
+
+        foreach (var task in assetTasks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await CheckAssetTaskAsync(dbContext, task.Id, task.TaskId, cancellationToken);
+        }
+    }
+
+    private async Task CheckAssetTaskAsync(
+        ArExperienceDbContext dbContext,
+        Guid modelId,
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient("NodeOdm");
+        using var statusResponse = await client.GetAsync(BuildNodeOdmUri($"task/{taskId}/info"), cancellationToken);
+        if (statusResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            await MarkAssetFailedAsync(dbContext, modelId, taskId,
+                "Worker không còn tìm thấy tác vụ dựng mô hình.", cancellationToken);
+            return;
+        }
+        if (!statusResponse.IsSuccessStatusCode)
+            return;
+
+        using var statusJson = await JsonDocument.ParseAsync(
+            await statusResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        if (!statusJson.RootElement.TryGetProperty("status", out var status) ||
+            !status.TryGetProperty("code", out var codeElement) ||
+            !codeElement.TryGetInt32(out var code))
+            return;
+        if (code is 10 or 20)
+            return;
+        if (code is 30 or 50)
+        {
+            await MarkAssetFailedAsync(dbContext, modelId, taskId,
+                "Không dựng được mô hình. Hãy chụp thêm ảnh rõ nét, đủ sáng và chồng lấp góc nhìn.", cancellationToken);
+            await RemoveNodeOdmTaskAsync(client, taskId, cancellationToken);
+            return;
+        }
+        if (code != 40)
+            return;
+
+        var asset = await dbContext.ArModelAssets.FirstOrDefaultAsync(x => x.Id == modelId, cancellationToken);
+        if (asset is null || !string.Equals(asset.NodeOdmTaskId, taskId, StringComparison.Ordinal))
+            return;
+
+        var temporaryArchive = Path.Combine(Path.GetTempPath(), $"ar-asset-{Guid.NewGuid():N}.zip");
+        var temporaryModel = Path.Combine(Path.GetTempPath(), $"ar-asset-{Guid.NewGuid():N}.glb");
+        try
+        {
+            await DownloadNodeOdmArchiveAsync(client, taskId, temporaryArchive, cancellationToken);
+            await using var archiveFile = File.OpenRead(temporaryArchive);
+            using var archive = new ZipArchive(archiveFile, ZipArchiveMode.Read, leaveOpen: false);
+            var modelEntry = archive.Entries.FirstOrDefault(entry =>
+                entry.FullName.Replace('\\', '/').Equals(ExpectedModelPath, StringComparison.OrdinalIgnoreCase));
+            if (modelEntry is null || modelEntry.Length <= 0 || modelEntry.Length > _options.MaxModelBytes)
+                throw new InvalidDataException("NodeODM archive did not contain a usable GLB model.");
+
+            await ExtractModelAsync(modelEntry, temporaryModel, cancellationToken);
+            var objectKey = $"ar-models/library/{modelId:N}/{Guid.NewGuid():N}.glb";
+            StorageUploadResult uploadResult;
+            await using (var modelStream = File.OpenRead(temporaryModel))
+            {
+                uploadResult = await _objectStorageService.UploadPhotoAsync(
+                    modelStream,
+                    "model/gltf-binary",
+                    objectKey,
+                    cancellationToken);
+            }
+
+            asset.CompleteModelProcessing(uploadResult.ObjectKey, DateTimeOffset.UtcNow);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await RemoveNodeOdmTaskAsync(client, taskId, cancellationToken);
+            _logger.LogInformation("Independent 3D object {ModelId} is ready.", modelId);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogError(exception, "Could not store generated GLB for 3D object {ModelId}.", modelId);
+            if (exception is InvalidDataException)
+            {
+                await MarkAssetFailedAsync(dbContext, modelId, taskId,
+                    "Worker không tạo được tệp GLB hợp lệ từ bộ ảnh này.", cancellationToken);
+                await RemoveNodeOdmTaskAsync(client, taskId, cancellationToken);
+            }
+        }
+        finally
+        {
+            try { File.Delete(temporaryArchive); }
+            catch (IOException) { }
+            try { File.Delete(temporaryModel); }
+            catch (IOException) { }
+        }
+    }
+
+    private static async Task MarkAssetFailedAsync(
+        ArExperienceDbContext dbContext,
+        Guid modelId,
+        string taskId,
+        string error,
+        CancellationToken cancellationToken)
+    {
+        var asset = await dbContext.ArModelAssets.FirstOrDefaultAsync(x => x.Id == modelId, cancellationToken);
+        if (asset is null || !string.Equals(asset.NodeOdmTaskId, taskId, StringComparison.Ordinal))
+            return;
+        asset.FailModelProcessing(error, DateTimeOffset.UtcNow);
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task CheckTaskAsync(

@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -95,7 +96,8 @@ fun ArSelfieCaptureScreen(
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var cameraError by remember { mutableStateOf<String?>(null) }
     var isCapturing by remember { mutableStateOf(false) }
-    var showCapturePreview by remember { mutableStateOf(false) }
+    var showUploadDialog by remember { mutableStateOf(false) }
+    var isFrontCamera by remember { mutableStateOf(true) }
     var pendingPhoto by remember { mutableStateOf<File?>(null) }
     var pendingAnchor by remember { mutableStateOf<PhotoAnchorSnapshot?>(null) }
     var caption by remember { mutableStateOf("") }
@@ -105,9 +107,9 @@ fun ArSelfieCaptureScreen(
     ) { granted ->
         hasCameraPermission = granted
         cameraError = if (granted) null else if (isEn) {
-            "Camera permission is required to take a selfie."
+            "Camera permission is required to take a photo."
         } else {
-            "Cần cấp quyền camera để chụp selfie."
+            "Cần cấp quyền camera để chụp ảnh."
         }
     }
 
@@ -122,7 +124,7 @@ fun ArSelfieCaptureScreen(
     val isWithinPoiZone = hasUsableGps &&
         distanceToPoi <= arContext.activationRadiusMeters + 20.0
 
-    DisposableEffect(hasCameraPermission, lifecycleOwner, previewView) {
+    DisposableEffect(hasCameraPermission, lifecycleOwner, previewView, isFrontCamera) {
         var disposed = false
         var cameraProvider: ProcessCameraProvider? = null
 
@@ -132,10 +134,14 @@ fun ArSelfieCaptureScreen(
                 if (!disposed) {
                     try {
                         val provider = providerFuture.get()
-                        val frontCamera = CameraSelector.DEFAULT_FRONT_CAMERA
-                        check(provider.hasCamera(frontCamera)) {
-                            if (isEn) "This device does not have a front camera."
-                            else "Thiết bị không có camera trước."
+                        val cameraSelector = if (isFrontCamera) {
+                            CameraSelector.DEFAULT_FRONT_CAMERA
+                        } else {
+                            CameraSelector.DEFAULT_BACK_CAMERA
+                        }
+                        check(provider.hasCamera(cameraSelector)) {
+                            if (isEn) "This device does not have the selected camera."
+                            else "Thiết bị không có camera đã chọn."
                         }
 
                         val preview = Preview.Builder().build().also {
@@ -147,16 +153,16 @@ fun ArSelfieCaptureScreen(
                             .build()
 
                         provider.unbindAll()
-                        provider.bindToLifecycle(lifecycleOwner, frontCamera, preview, capture)
+                        provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, capture)
                         cameraProvider = provider
                         imageCapture = capture
                         cameraError = null
                     } catch (error: Exception) {
                         imageCapture = null
                         cameraError = error.localizedMessage ?: if (isEn) {
-                            "Could not start the front camera."
+                            "Could not start the selected camera."
                         } else {
-                            "Không thể mở camera trước."
+                            "Không thể mở camera đã chọn."
                         }
                     }
                 }
@@ -176,14 +182,14 @@ fun ArSelfieCaptureScreen(
         pendingPhoto?.let { runCatching { it.delete() } }
         pendingPhoto = null
         pendingAnchor = null
-        showCapturePreview = false
+        showUploadDialog = false
     }
     val closeScreen = {
         discardPendingPhoto()
         onClose()
     }
 
-    BackHandler(enabled = !showCapturePreview) { closeScreen() }
+    BackHandler(enabled = !showUploadDialog) { closeScreen() }
 
     val captureSelfie: () -> Unit = {
         val capture = imageCapture
@@ -194,17 +200,21 @@ fun ArSelfieCaptureScreen(
                 "Hãy đến gần điểm AR và chờ GPS thực trước khi chụp ảnh."
             }
             capture == null -> cameraError = if (isEn) {
-                "The front camera is not ready yet."
+                "The selected camera is not ready yet."
             } else {
-                "Camera trước chưa sẵn sàng."
+                "Camera chưa sẵn sàng."
             }
             !isCapturing -> {
                 val file = File(context.cacheDir, "poi_selfie_${System.currentTimeMillis()}.jpg")
                 val anchor = PhotoAnchorSnapshot(
                     latitude = spatialPose.latitude,
                     longitude = spatialPose.longitude,
-                    // The front camera faces opposite the rear-camera heading used by the AR viewer.
-                    azimuthDegrees = (spatialPose.azimuthDegrees + 180f) % 360f,
+                    // A front-facing camera points opposite the device heading; the rear camera does not.
+                    azimuthDegrees = if (isFrontCamera) {
+                        (spatialPose.azimuthDegrees + 180f) % 360f
+                    } else {
+                        spatialPose.azimuthDegrees
+                    },
                     pitchDegrees = spatialPose.pitchDegrees.coerceIn(-90f, 90f)
                 )
                 capture.targetRotation = previewView.display?.rotation ?: AndroidSurface.ROTATION_0
@@ -219,16 +229,16 @@ fun ArSelfieCaptureScreen(
                             pendingAnchor = anchor
                             caption = ""
                             cameraError = null
-                            showCapturePreview = true
+                            showUploadDialog = true
                         }
 
                         override fun onError(exception: ImageCaptureException) {
                             isCapturing = false
                             file.delete()
                             cameraError = exception.localizedMessage ?: if (isEn) {
-                                "Could not capture the selfie."
+                                "Could not capture the photo."
                             } else {
-                                "Không thể chụp ảnh selfie."
+                                "Không thể chụp ảnh."
                             }
                         }
                     }
@@ -293,9 +303,26 @@ fun ArSelfieCaptureScreen(
                             fontSize = 16.sp
                         )
                         Text(
-                            text = if (isEn) "Front camera selfie" else "Camera trước • Chụp selfie",
+                            text = if (isEn) {
+                                if (isFrontCamera) "Front camera" else "Rear camera"
+                            } else {
+                                if (isFrontCamera) "Camera trước" else "Camera sau"
+                            },
                             color = BrandColors.Cream,
                             fontSize = 12.sp
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            isFrontCamera = !isFrontCamera
+                            cameraError = null
+                        },
+                        enabled = hasCameraPermission && !isCapturing && !isUploadingPhoto
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Cameraswitch,
+                            contentDescription = if (isEn) "Switch camera" else "Đổi camera trước/sau",
+                            tint = Color.White
                         )
                     }
                 }
@@ -314,12 +341,12 @@ fun ArSelfieCaptureScreen(
                 ) {
                     Text(
                         text = when {
-                            !hasCameraPermission -> if (isEn) "Allow camera access to take a selfie." else "Cấp quyền camera để chụp selfie."
+                            !hasCameraPermission -> if (isEn) "Allow camera access to take a photo." else "Cấp quyền camera để chụp ảnh."
                             cameraError != null -> cameraError!!
-                            imageCapture == null -> if (isEn) "Starting the front camera…" else "Đang khởi động camera trước…"
+                            imageCapture == null -> if (isEn) "Starting camera…" else "Đang khởi động camera…"
                             !hasUsableGps -> if (isEn) "Waiting for a live GPS position…" else "Đang chờ vị trí GPS thực…"
                             !isWithinPoiZone -> if (isEn) "Move within ${ (arContext.activationRadiusMeters + 20).toInt() }m of this AR point." else "Hãy đến trong phạm vi ${(arContext.activationRadiusMeters + 20).toInt()}m của điểm AR."
-                            else -> if (isEn) "Your selfie will be attached to your current location." else "Ảnh selfie sẽ được gắn với vị trí hiện tại của bạn."
+                            else -> if (isEn) "Your photo will be attached to your current location." else "Ảnh sẽ được gắn với vị trí hiện tại của bạn."
                         },
                         color = if (cameraError != null) BrandColors.Error else BrandColors.Cream,
                         fontSize = 13.sp,
@@ -350,7 +377,7 @@ fun ArSelfieCaptureScreen(
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.PhotoCamera,
-                                    contentDescription = if (isEn) "Take selfie" else "Chụp selfie",
+                                    contentDescription = if (isEn) "Take photo" else "Chụp ảnh",
                                     tint = BrandColors.Terracotta,
                                     modifier = Modifier.size(30.dp)
                                 )
@@ -358,7 +385,7 @@ fun ArSelfieCaptureScreen(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = if (isEn) "Take selfie" else "Chụp selfie tại điểm AR",
+                            text = if (isEn) "Take photo" else "Chụp ảnh tại điểm AR",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp
@@ -369,12 +396,12 @@ fun ArSelfieCaptureScreen(
         }
     }
 
-    if (showCapturePreview && pendingPhoto != null) {
+    if (showUploadDialog && pendingPhoto != null) {
         AlertDialog(
             onDismissRequest = { if (!isUploadingPhoto) discardPendingPhoto() },
             title = {
                 Text(
-                    text = if (isEn) "Share selfie to AR" else "Chia sẻ selfie lên Không gian AR",
+                    text = if (isEn) "Share photo to AR" else "Chia sẻ ảnh lên Không gian AR",
                     fontWeight = FontWeight.Bold
                 )
             },
@@ -382,12 +409,22 @@ fun ArSelfieCaptureScreen(
                 Column {
                     AsyncImage(
                         model = pendingPhoto,
-                        contentDescription = if (isEn) "Selfie preview" else "Xem trước ảnh selfie",
+                        contentDescription = if (isEn) "Captured photo preview" else "Ảnh vừa chụp",
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(220.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(Color.Black)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = if (isEn) {
+                            "Review the captured photo, add a caption, then upload it to AR."
+                        } else {
+                            "Xem lại ảnh vừa chụp, thêm chú thích rồi tải lên Không gian AR."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (!uploadErrorMessage.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -422,8 +459,8 @@ fun ArSelfieCaptureScreen(
                         when {
                             isUploadingPhoto && isEn -> "Uploading…"
                             isUploadingPhoto -> "Đang tải lên…"
-                            isEn -> "Upload selfie"
-                            else -> "Tải selfie lên"
+                            isEn -> "Upload photo"
+                            else -> "Tải ảnh lên"
                         }
                     )
                 }

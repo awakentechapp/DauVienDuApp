@@ -27,6 +27,7 @@ public sealed class ContaboStorageOptions
 /// </summary>
 public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisposable
 {
+    // The bucket remains private; this short-lived URL only grants temporary read access to one object.
     private static readonly TimeSpan ReadUrlLifetime = TimeSpan.FromMinutes(15);
 
     private readonly ContaboStorageOptions _options;

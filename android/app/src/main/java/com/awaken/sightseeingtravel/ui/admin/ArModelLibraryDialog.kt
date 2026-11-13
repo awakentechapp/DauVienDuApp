@@ -101,7 +101,7 @@ fun ArModelLibraryDialog(
                             color = BrandColors.PrimaryDeep
                         )
                         Text(
-                            text = if (isEnglish) "${filteredLibrary.size} ready objects" else "${filteredLibrary.size} vật thể đã sẵn sàng",
+                            text = if (isEnglish) "${filteredLibrary.size} objects" else "${filteredLibrary.size} vật thể",
                             color = BrandColors.MutedText,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -155,7 +155,7 @@ fun ArModelLibraryDialog(
                     ) {
                         Text(
                             text = if (library.isEmpty()) {
-                                if (isEnglish) "No 3D objects yet. Create one from an AR card." else "Kho chưa có vật thể 3D. Hãy tạo vật thể từ một thẻ AR."
+                                if (isEnglish) "No 3D objects yet. Create one separately, then place it in an AR scene." else "Kho chưa có vật thể 3D. Hãy tạo vật thể riêng rồi đặt vào thẻ AR."
                             } else {
                                 if (isEnglish) "No objects in this category." else "Không có vật thể trong phân loại này."
                             },
@@ -166,7 +166,7 @@ fun ArModelLibraryDialog(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(filteredLibrary, key = { it.sourceCardId }) { item ->
+                        items(filteredLibrary, key = { it.sourceModelId }) { item ->
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(16.dp),
@@ -197,8 +197,13 @@ fun ArModelLibraryDialog(
                                             style = MaterialTheme.typography.labelMedium
                                         )
                                         Text(
-                                            text = if (isEnglish) "Ready • AR card ${item.sourceCardId.take(8)}" else "Sẵn sàng • Thẻ AR ${item.sourceCardId.take(8)}",
-                                            color = BrandColors.MutedText,
+                                            text = when (item.status.lowercase()) {
+                                                "ready" -> if (isEnglish) "Ready to place in AR" else "Sẵn sàng để đặt vào AR"
+                                                "processing" -> if (isEnglish) "Building 3D model…" else "Đang dựng mô hình 3D…"
+                                                "failed" -> item.errorMessage ?: if (isEnglish) "Model creation failed" else "Dựng mô hình thất bại"
+                                                else -> item.status
+                                            },
+                                            color = if (item.status.equals("failed", true)) MaterialTheme.colorScheme.error else BrandColors.MutedText,
                                             style = MaterialTheme.typography.bodySmall
                                         )
                                         Text(
@@ -206,13 +211,15 @@ fun ArModelLibraryDialog(
                                             color = BrandColors.MutedText,
                                             style = MaterialTheme.typography.bodySmall
                                         )
-                                        OutlinedButton(
-                                            onClick = { previewItem = item },
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)
-                                        ) {
-                                            Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(if (isEnglish) "Preview 3D" else "Xem thử 3D")
+                                        if (item.status.equals("Ready", true) && !item.modelUrl.isNullOrBlank()) {
+                                            OutlinedButton(
+                                                onClick = { previewItem = item },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)
+                                            ) {
+                                                Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(if (isEnglish) "Preview 3D" else "Xem thử 3D")
+                                            }
                                         }
                                     }
                                 }
@@ -247,13 +254,14 @@ private fun ArModelPreviewDialog(
     val engine = rememberEngine()
     val modelLoader = rememberModelLoader(engine)
     val childNodes = rememberNodes()
-    var isLoading by remember(item.sourceCardId) { mutableStateOf(true) }
-    var loadError by remember(item.sourceCardId) { mutableStateOf<String?>(null) }
+    var isLoading by remember(item.sourceModelId) { mutableStateOf(true) }
+    var loadError by remember(item.sourceModelId) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(item.sourceCardId, item.modelUrl) {
+    LaunchedEffect(item.sourceModelId, item.modelUrl) {
         isLoading = true
         loadError = null
-        runCatching { modelLoader.loadModelInstance(item.modelUrl) }
+        val modelUrl = item.modelUrl ?: return@LaunchedEffect
+        runCatching { modelLoader.loadModelInstance(modelUrl) }
             .onSuccess { modelInstance ->
                 if (modelInstance == null) {
                     loadError = if (isEnglish) "The 3D model could not be read." else "Không đọc được mô hình 3D."

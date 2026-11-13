@@ -372,12 +372,15 @@ data class AdminArInfoCardDto(
 )
 
 data class ArModelLibraryItemDto(
-    @SerializedName("sourceCardId") val sourceCardId: String,
-    @SerializedName("sourcePoiId") val sourcePoiId: String,
     @SerializedName("name") val name: String,
-    @SerializedName("modelUrl") val modelUrl: String,
+    @SerializedName("sourceCardId") val sourceCardId: String = "",
+    @SerializedName("sourcePoiId") val sourcePoiId: String? = null,
+    @SerializedName("modelUrl") val modelUrl: String? = null,
     @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float = 0f,
-    @SerializedName("category") val category: String = "Object"
+    @SerializedName("category") val category: String = "Object",
+    @SerializedName("sourceModelId") val sourceModelId: String = sourceCardId,
+    @SerializedName("status") val status: String = "Ready",
+    @SerializedName("errorMessage") val errorMessage: String? = null
 )
 
 data class PlaceArModelRequest(
@@ -386,13 +389,28 @@ data class PlaceArModelRequest(
     @SerializedName("azimuthDegrees") val azimuthDegrees: Float,
     @SerializedName("distanceMeters") val distanceMeters: Float,
     @SerializedName("elevationMeters") val elevationMeters: Float,
-    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float,
+    @SerializedName("sourceModelId") val sourceModelId: String = sourceCardId
 )
 
 data class ArModelBuildSubmissionDto(
     @SerializedName("cardId") val cardId: String,
     @SerializedName("status") val status: String,
     @SerializedName("message") val message: String
+)
+
+data class ArModelAssetBuildSubmissionDto(
+    @SerializedName("modelId") val modelId: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String
+)
+
+data class ArModelAssetBuildStatusDto(
+    @SerializedName("modelId") val modelId: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("errorMessage") val errorMessage: String? = null,
+    @SerializedName("name") val name: String,
+    @SerializedName("category") val category: String = "Object"
 )
 
 data class ArModelBuildStatusDto(

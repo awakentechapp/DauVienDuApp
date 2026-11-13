@@ -59,9 +59,12 @@ public sealed record ArModelLibraryItemDto(
     Guid SourceCardId,
     Guid SourcePoiId,
     string Name,
-    string ModelUrl,
+    string? ModelUrl,
     double ModelRotationDegrees,
-    string Category = "Object");
+    string Category = "Object",
+    Guid? SourceModelId = null,
+    string Status = "Ready",
+    string? ErrorMessage = null);
 
 public sealed record PlaceArModelRequest(
     Guid SourceCardId,
@@ -69,4 +72,5 @@ public sealed record PlaceArModelRequest(
     double AzimuthDegrees,
     double DistanceMeters,
     double ElevationMeters,
-    double ModelRotationDegrees);
+    double ModelRotationDegrees,
+    Guid? SourceModelId = null);

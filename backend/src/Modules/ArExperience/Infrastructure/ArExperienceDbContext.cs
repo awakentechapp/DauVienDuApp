@@ -10,6 +10,7 @@ public sealed class ArExperienceDbContext : DbContext
 
     public DbSet<ArInfoCard> ArInfoCards => Set<ArInfoCard>();
     public DbSet<ArInfoCardLocalization> ArInfoCardLocalizations => Set<ArInfoCardLocalization>();
+    public DbSet<ArModelAsset> ArModelAssets => Set<ArModelAsset>();
 
     public ArExperienceDbContext(DbContextOptions<ArExperienceDbContext> options)
         : base(options)
@@ -116,6 +117,24 @@ public sealed class ArExperienceDbContext : DbContext
             builder.HasIndex(x => new { x.ArInfoCardId, x.LanguageCode })
                 .IsUnique()
                 .HasDatabaseName("UX_ar_card_localizations_card_lang");
+        });
+
+        modelBuilder.Entity<ArModelAsset>(builder =>
+        {
+            builder.ToTable("ar_model_assets", SchemaName);
+            builder.HasKey(x => x.Id);
+            builder.Property(x => x.Id).ValueGeneratedNever();
+            builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            builder.Property(x => x.Category).HasConversion<string>().HasMaxLength(20).IsRequired();
+            builder.Property(x => x.ModelObjectKey).HasMaxLength(512);
+            builder.Property(x => x.ModelStatus).HasMaxLength(20).IsRequired();
+            builder.Property(x => x.ModelError).HasMaxLength(500);
+            builder.Property(x => x.NodeOdmTaskId).HasMaxLength(128);
+            builder.Property(x => x.ModelRotationDegrees).IsRequired();
+            builder.Property(x => x.CreatedAt).IsRequired();
+            builder.Property(x => x.UpdatedAt).IsRequired();
+            builder.HasIndex(x => x.ModelStatus).HasDatabaseName("IX_ar_model_assets_status");
+            builder.HasIndex(x => x.ModelObjectKey).HasDatabaseName("IX_ar_model_assets_object_key");
         });
 
         modelBuilder.ApplySnakeCaseColumnNames();
