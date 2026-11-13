@@ -427,12 +427,12 @@ public sealed class AttractionService : IAttractionService
         {
             var message = exception.StorageErrorCode == "SignatureDoesNotMatch"
                 ? "Contabo Object Storage từ chối chữ ký xác thực. Vui lòng kiểm tra cặp Access Key/Secret Key trong cấu hình máy chủ."
-                : "Không thể lưu ảnh POI vào kho lưu trữ. Vui lòng thử lại sau.";
+                : "Contabo Object Storage không phản hồi kịp thời. Ảnh POI chưa được lưu; vui lòng thử lại sau.";
 
             return Result.Failure<AdminPoiDto>(new Error(
                 "POI_COVER_STORAGE_UPLOAD_FAILED",
                 message,
-                ErrorType.Failure));
+                ErrorType.ServiceUnavailable));
         }
 
         poi.SetCoverImage(uploadResult.StorageUrl, uploadResult.ObjectKey, _dateTimeProvider.UtcNow);

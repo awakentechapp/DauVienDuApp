@@ -219,6 +219,7 @@ public static class CommunityMediaEndpoints
             ErrorType.NotFound => StatusCodes.Status404NotFound,
             ErrorType.Conflict => StatusCodes.Status409Conflict,
             ErrorType.UnprocessableEntity => StatusCodes.Status422UnprocessableEntity,
+            ErrorType.ServiceUnavailable => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError
         };
 

@@ -289,8 +289,15 @@ object SightseeingNetworkModule {
         }
 
         val gson = ApiResponseAdapters.createGson()
+        val refreshClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(25, TimeUnit.SECONDS)
+            .build()
         val refreshRetrofit = Retrofit.Builder()
             .baseUrl(BuildConfig.API_BASE_URL)
+            .client(refreshClient)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
         val syncRefreshApi = refreshRetrofit.create(SyncTokenRefreshApi::class.java)
@@ -309,11 +316,34 @@ object SightseeingNetworkModule {
         }
 
         val tokenAuthenticator = Authenticator { _, response ->
-            if (responseCount(response) >= 2) {
-                return@Authenticator null
-            }
-            val currentRefresh = tokenStore.refreshToken ?: return@Authenticator null
             synchronized(this) {
+                val failedAccessToken = response.request.header("Authorization")
+                    ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
+                    ?.substringAfter(' ')
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                val latestAccessToken = tokenStore.accessToken
+
+                // Another request may already have rotated the refresh token while this
+                // 401 waited for the lock. Retry with that newer access token instead of
+                // trying to consume the now-revoked refresh token a second time.
+                if (!latestAccessToken.isNullOrBlank() && latestAccessToken != failedAccessToken) {
+                    return@Authenticator response.request.newBuilder()
+                        .header("Authorization", "Bearer $latestAccessToken")
+                        .build()
+                }
+
+                if (responseCount(response) >= 2) {
+                    tokenStore.clearSession()
+                    return@Authenticator null
+                }
+
+                val currentRefresh = tokenStore.refreshToken
+                if (currentRefresh.isNullOrBlank()) {
+                    tokenStore.clearSession()
+                    return@Authenticator null
+                }
+
                 try {
                     val refreshCall = syncRefreshApi.refreshSync(RefreshTokenRequest(currentRefresh))
                     val refreshResponse = refreshCall.execute()
@@ -323,10 +353,13 @@ object SightseeingNetworkModule {
                         return@Authenticator response.request.newBuilder()
                             .header("Authorization", "Bearer ${body.accessToken}")
                             .build()
-                    } else {
+                    } else if (refreshResponse.code() == 401 || refreshResponse.code() == 403) {
+                        // Only clear the session for a definitive invalid/blocked session.
+                        // Transient server failures should not erase a valid refresh token.
                         tokenStore.clearSession()
                         return@Authenticator null
                     }
+                    return@Authenticator null
                 } catch (_: Exception) {
                     return@Authenticator null
                 }

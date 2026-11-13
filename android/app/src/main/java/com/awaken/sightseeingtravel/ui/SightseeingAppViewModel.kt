@@ -28,6 +28,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import retrofit2.HttpException
 import java.io.File
+import java.net.SocketTimeoutException
 
 /**
  * Unidirectional Data Flow (UDF) UI State for Sightseeing Travel AR Application.
@@ -954,8 +955,10 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private fun photoUploadErrorMessage(error: Exception): String {
-        val httpError = error as? HttpException
-            ?: return error.message ?: "Không thể tải ảnh lên máy chủ."
+        val httpError = error as? HttpException ?: return when (error) {
+            is SocketTimeoutException -> "Máy chủ lưu trữ ảnh phản hồi quá lâu. Vui lòng kiểm tra kết nối và thử lại."
+            else -> error.message ?: "Không thể tải ảnh lên máy chủ."
+        }
         val responseBody = runCatching { httpError.response()?.errorBody()?.string() }.getOrNull()
         val serverMessage = runCatching {
             val problem = JSONObject(responseBody.orEmpty())

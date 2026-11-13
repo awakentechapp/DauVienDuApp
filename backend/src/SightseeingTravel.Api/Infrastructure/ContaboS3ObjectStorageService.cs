@@ -29,6 +29,7 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
 {
     // The bucket remains private; this short-lived URL only grants temporary read access to one object.
     private static readonly TimeSpan ReadUrlLifetime = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan UploadTimeout = TimeSpan.FromSeconds(20);
 
     private readonly ContaboStorageOptions _options;
     private readonly IAmazonS3 _s3Client;
@@ -77,7 +78,9 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
 
         try
         {
-            await _s3Client.PutObjectAsync(putRequest, cancellationToken);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(UploadTimeout);
+            await _s3Client.PutObjectAsync(putRequest, timeoutCts.Token);
         }
         catch (AmazonS3Exception exception)
         {
@@ -92,6 +95,31 @@ public sealed class ContaboS3ObjectStorageService : IObjectStorageService, IDisp
                 "The object storage upload failed.",
                 exception,
                 exception.ErrorCode);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Contabo S3 PutObject timed out. Bucket={BucketName}, TimeoutSeconds={TimeoutSeconds}",
+                _options.BucketName,
+                UploadTimeout.TotalSeconds);
+            throw new ObjectStorageUploadException(
+                "Contabo Object Storage did not respond before the upload timeout.",
+                exception);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Contabo S3 PutObject failed before receiving a storage response. Bucket={BucketName}",
+                _options.BucketName);
+            throw new ObjectStorageUploadException(
+                "Contabo Object Storage could not complete the upload.",
+                exception);
         }
 
         var storageUrl = $"{_options.PublicBaseUrl.TrimEnd('/')}/{normalizedKey}";
