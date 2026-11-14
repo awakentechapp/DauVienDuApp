@@ -73,6 +73,17 @@ public static class ArExperienceEndpoints
                 : ToErrorResult(result.Error);
         });
 
+        adminGroup.MapDelete("/ar-models/{modelId:guid}", async (
+            Guid modelId,
+            IArExperienceService arExperienceService,
+            CancellationToken ct) =>
+        {
+            var result = await arExperienceService.DeleteArModelAssetAsync(modelId, ct);
+            return result.IsSuccess
+                ? Results.NoContent()
+                : ToErrorResult(result.Error);
+        });
+
         adminGroup.MapPost("/pois/{poiId:guid}/placed-ar-model", async (
             Guid poiId,
             [FromBody] PlaceArModelRequest request,

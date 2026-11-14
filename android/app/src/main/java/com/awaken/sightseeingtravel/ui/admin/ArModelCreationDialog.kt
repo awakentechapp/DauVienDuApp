@@ -2,6 +2,10 @@ package com.awaken.sightseeingtravel.ui.admin
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.view.Surface as AndroidSurface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,12 +39,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -77,9 +83,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import com.awaken.sightseeingtravel.ui.BrandColors
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import kotlin.math.max
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ArModelCreationDialog(
@@ -216,14 +228,19 @@ fun ArModelCreationDialog(
                 ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                        isCapturing = false
-                        if (file.length() > 0L) {
-                            capturedFiles.add(file)
-                            captureError = null
-                            submitError = null
-                        } else {
-                            file.delete()
-                            captureError = "Ảnh vừa chụp không hợp lệ. Hãy chụp lại."
+                        scope.launch {
+                            val optimized = withContext(Dispatchers.IO) {
+                                runCatching { optimizePhotogrammetryImage(file) }.getOrDefault(false)
+                            }
+                            isCapturing = false
+                            if (optimized) {
+                                capturedFiles.add(file)
+                                captureError = null
+                                submitError = null
+                            } else {
+                                file.delete()
+                                captureError = "Không thể tối ưu ảnh vừa chụp. Hãy kiểm tra bộ nhớ trống rồi chụp lại."
+                            }
                         }
                     }
 
@@ -251,7 +268,7 @@ fun ArModelCreationDialog(
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            color = BrandColors.PrimaryDeep
+            color = BrandColors.Paper
         ) {
             Column(
                 modifier = Modifier
@@ -263,11 +280,11 @@ fun ArModelCreationDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { if (!isSubmitting) onDismiss() }, enabled = !isSubmitting) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Quay lại", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại", tint = BrandColors.Primary)
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Tạo vật thể 3D", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 19.sp)
-                        Text("Tạo độc lập, sau đó chọn để đặt vào thẻ AR", color = BrandColors.Cream, fontSize = 12.sp)
+                        Text("Tạo vật thể 3D", color = BrandColors.PrimaryDeep, fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                        Text("Tạo độc lập, sau đó chọn để đặt vào thẻ AR", color = BrandColors.MutedText, fontSize = 12.sp)
                     }
                 }
 
@@ -283,34 +300,46 @@ fun ArModelCreationDialog(
                         singleLine = true,
                         enabled = !isSubmitting,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = BrandColors.PrimaryDeep,
-                            unfocusedTextColor = BrandColors.PrimaryDeep,
-                            disabledTextColor = BrandColors.PrimaryDeep.copy(alpha = 0.65f),
-                            focusedContainerColor = BrandColors.Cream,
-                            unfocusedContainerColor = BrandColors.Cream,
-                            disabledContainerColor = BrandColors.Cream.copy(alpha = 0.8f),
-                            focusedBorderColor = BrandColors.Cream,
-                            unfocusedBorderColor = BrandColors.Cream,
-                            disabledBorderColor = BrandColors.Cream.copy(alpha = 0.7f),
-                            focusedLabelColor = BrandColors.PrimaryDeep,
-                            unfocusedLabelColor = BrandColors.PrimaryDeep.copy(alpha = 0.8f),
-                            disabledLabelColor = BrandColors.PrimaryDeep.copy(alpha = 0.65f),
-                            cursorColor = BrandColors.PrimaryDeep
+                            focusedTextColor = BrandColors.Text,
+                            unfocusedTextColor = BrandColors.Text,
+                            disabledTextColor = BrandColors.MutedText,
+                            focusedContainerColor = BrandColors.Surface,
+                            unfocusedContainerColor = BrandColors.Surface,
+                            disabledContainerColor = BrandColors.Surface,
+                            focusedBorderColor = BrandColors.Terracotta,
+                            unfocusedBorderColor = BrandColors.Border,
+                            disabledBorderColor = BrandColors.Border,
+                            focusedLabelColor = BrandColors.Terracotta,
+                            unfocusedLabelColor = BrandColors.MutedText,
+                            disabledLabelColor = BrandColors.MutedText,
+                            cursorColor = BrandColors.Primary
                         )
                     )
-                    Text("Phân loại vật thể", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Phân loại vật thể", color = BrandColors.PrimaryDeep, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
                             selected = modelCategory == "Food",
                             onClick = { modelCategory = "Food" },
                             enabled = !isSubmitting,
-                            label = { Text("Món ăn") }
+                            label = { Text("Món ăn") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = BrandColors.Primary,
+                                selectedLabelColor = BrandColors.Paper,
+                                containerColor = BrandColors.Surface,
+                                labelColor = BrandColors.Text
+                            )
                         )
                         FilterChip(
                             selected = modelCategory == "Object",
                             onClick = { modelCategory = "Object" },
                             enabled = !isSubmitting,
-                            label = { Text("Vật dụng") }
+                            label = { Text("Vật dụng") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = BrandColors.Primary,
+                                selectedLabelColor = BrandColors.Paper,
+                                containerColor = BrandColors.Surface,
+                                labelColor = BrandColors.Text
+                            )
                         )
                     }
 
@@ -358,22 +387,22 @@ fun ArModelCreationDialog(
                     } else {
                         Surface(
                             modifier = Modifier.fillMaxWidth().height(140.dp),
-                            color = Color.Black.copy(alpha = 0.25f),
+                            color = BrandColors.Sand,
                             shape = RoundedCornerShape(18.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text("Bật camera để ngắm và chụp vật thể", color = Color.White)
+                                Text("Bật camera để ngắm và chụp vật thể", color = BrandColors.PrimaryDeep)
                             }
                         }
                     }
 
                     Text(
-                        "Camera trực tiếp hiển thị để ngắm. Ảnh đã chụp không hiện preview; chỉ hiển thị số lượng để bạn chụp tiếp.",
-                        color = BrandColors.Cream,
+                        "Camera hiển thị để ngắm. Ảnh đã chụp không hiện preview; mỗi ảnh được tự nén trước khi gửi.",
+                        color = BrandColors.MutedText,
                         style = MaterialTheme.typography.bodySmall
                     )
-                    Text("${capturedFiles.size}/32 ảnh", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Surface(color = BrandColors.Cream, shape = RoundedCornerShape(14.dp)) {
+                    Text("${capturedFiles.size}/32 ảnh", color = BrandColors.PrimaryDeep, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Surface(color = BrandColors.Sand, shape = RoundedCornerShape(14.dp)) {
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(5.dp)
@@ -385,7 +414,7 @@ fun ArModelCreationDialog(
                                     currentQualityWarning != null -> currentQualityWarning
                                     else -> "Ánh sáng và độ nét ổn. Giữ máy yên khi chụp."
                                 },
-                                color = if (currentQualityWarning != null) BrandColors.Terracotta else BrandColors.PrimaryDeep,
+                                color = if (currentQualityWarning != null) BrandColors.Error else BrandColors.PrimaryDeep,
                                 fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.bodySmall
                             )
@@ -397,14 +426,14 @@ fun ArModelCreationDialog(
                         }
                     }
 
-                    if (!cameraError.isNullOrBlank()) Text(cameraError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    if (!captureError.isNullOrBlank()) Text(captureError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    if (!submitError.isNullOrBlank()) Text(submitError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    if (!cameraError.isNullOrBlank()) Text(cameraError.orEmpty(), color = BrandColors.Error)
+                    if (!captureError.isNullOrBlank()) Text(captureError.orEmpty(), color = BrandColors.Error)
+                    if (!submitError.isNullOrBlank()) Text(submitError.orEmpty(), color = BrandColors.Error)
 
                     if (isSubmitting) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = BrandColors.Cream)
-                            Text("Đang tải ảnh lên để dựng mô hình…", color = Color.White)
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = BrandColors.Terracotta)
+                            Text("Đang tải ảnh lên để dựng mô hình…", color = BrandColors.PrimaryDeep)
                         }
                     }
                 }
@@ -417,13 +446,15 @@ fun ArModelCreationDialog(
                                 else permissionLauncher.launch(Manifest.permission.CAMERA)
                             },
                             modifier = Modifier.weight(1f),
-                            enabled = !isSubmitting
+                            enabled = !isSubmitting,
+                            colors = arModelButtonColors()
                         ) { Text(if (hasCameraPermission) "Bật camera" else "Cấp quyền camera") }
                     } else {
                         Button(
                             onClick = capturePhoto,
                             modifier = Modifier.weight(1f),
-                            enabled = imageCapture != null && !isCapturing && !isSubmitting && capturedFiles.size < 32
+                            enabled = imageCapture != null && !isCapturing && !isSubmitting && capturedFiles.size < 32,
+                            colors = arModelButtonColors()
                         ) {
                             if (isCapturing) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -432,13 +463,13 @@ fun ArModelCreationDialog(
                                 Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.size(8.dp))
                             }
-                            Text(if (isCapturing) "Đang chụp…" else "Chụp ảnh tiếp")
+                            Text(if (isCapturing) "Đang xử lý ảnh…" else "Chụp ảnh tiếp")
                         }
                     }
                     TextButton(
                         onClick = { capturedFiles.removeLastOrNull()?.delete() },
                         enabled = !isSubmitting && !isCapturing && capturedFiles.isNotEmpty()
-                    ) { Text("Bỏ ảnh cuối", color = Color.White) }
+                    ) { Text("Bỏ ảnh cuối", color = BrandColors.Primary) }
                 }
 
                 if (capturedFiles.size >= 12) {
@@ -453,7 +484,8 @@ fun ArModelCreationDialog(
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = !isSubmitting && !isCapturing && modelName.isNotBlank()
+                        enabled = !isSubmitting && !isCapturing && modelName.isNotBlank(),
+                        colors = arModelButtonColors()
                     ) {
                         if (isSubmitting) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -553,3 +585,107 @@ private fun captureGuidance(capturedCount: Int): String = when {
     capturedCount < 24 -> "Đã có vòng ngang. Chụp vòng thứ hai từ góc cao hơn hoặc thấp hơn để ghi lại mặt trên, mặt dưới và các chi tiết khuất."
     else -> "Rà lại các góc còn thiếu; tránh chụp lặp một hướng. Cần ít nhất 12 ảnh rõ, đủ sáng và có góc nhìn chồng lấp."
 }
+
+@Composable
+private fun arModelButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = BrandColors.Primary,
+    contentColor = BrandColors.Paper,
+    disabledContainerColor = BrandColors.Border,
+    disabledContentColor = BrandColors.MutedText
+)
+
+/** Keeps a 12–32 photo photogrammetry request small enough for common proxy body limits. */
+private fun optimizePhotogrammetryImage(file: File): Boolean {
+    if (!file.exists() || file.length() <= 0L) return false
+
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
+
+    val exif = ExifInterface(file.absolutePath)
+    val orientation = exif.getAttributeInt(
+        ExifInterface.TAG_ORIENTATION,
+        ExifInterface.ORIENTATION_NORMAL
+    )
+    var sampleSize = 1
+    while (max(bounds.outWidth, bounds.outHeight) / sampleSize > 3_072) sampleSize *= 2
+
+    val decoded = BitmapFactory.decodeFile(
+        file.absolutePath,
+        BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+    ) ?: return false
+
+    val orientationMatrix = Matrix().apply {
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                setRotate(90f)
+                postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                setRotate(270f)
+                postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(270f)
+        }
+    }
+    val normalized = if (orientation in 2..8) {
+        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, orientationMatrix, true)
+    } else decoded
+    if (normalized !== decoded) decoded.recycle()
+
+    var working = normalized
+    var temporaryFile: File? = null
+    try {
+        var longestSide = max(working.width, working.height)
+        while (true) {
+            val qualities = if (longestSide <= 1_280) {
+                intArrayOf(68, 58, 48, 40)
+            } else {
+                intArrayOf(86, 78, 70, 62, 54)
+            }
+            var compressedBytes: ByteArray? = null
+            for (quality in qualities) {
+                val output = ByteArrayOutputStream()
+                if (!working.compress(Bitmap.CompressFormat.JPEG, quality, output)) return false
+                if (output.size() <= MAX_PHOTOGRAMMETRY_IMAGE_BYTES) {
+                    compressedBytes = output.toByteArray()
+                    break
+                }
+            }
+
+            if (compressedBytes != null) {
+                temporaryFile = File(file.parentFile, "${file.name}.optimized")
+                FileOutputStream(temporaryFile).use { it.write(compressedBytes) }
+                if (!temporaryFile.renameTo(file)) {
+                    FileOutputStream(file, false).use { output -> temporaryFile.inputStream().use { it.copyTo(output) } }
+                }
+                return file.length() > 0L && file.length() <= MAX_PHOTOGRAMMETRY_IMAGE_BYTES.toLong()
+            }
+
+            if (longestSide <= 800) return false
+            val nextLongestSide = (longestSide * 0.78f).roundToInt().coerceAtLeast(800)
+            val scale = nextLongestSide.toFloat() / longestSide
+            val resized = Bitmap.createScaledBitmap(
+                working,
+                (working.width * scale).roundToInt().coerceAtLeast(1),
+                (working.height * scale).roundToInt().coerceAtLeast(1),
+                true
+            )
+            if (resized !== working) working.recycle()
+            working = resized
+            longestSide = max(working.width, working.height)
+        }
+    } finally {
+        if (!working.isRecycled) working.recycle()
+        temporaryFile?.delete()
+    }
+}
+
+private const val MAX_PHOTOGRAMMETRY_IMAGE_BYTES = 640 * 1024

@@ -166,6 +166,11 @@ interface SightseeingApiService {
     @GET("api/v1/admin/ar-models/catalog")
     suspend fun getAdminArModelLibrary(): Response<List<ArModelLibraryItemDto>>
 
+    @DELETE("api/v1/admin/ar-models/{modelId}")
+    suspend fun deleteAdminArModelAsset(
+        @Path("modelId") modelId: String
+    ): Response<ResponseBody>
+
     @Multipart
     @POST("api/v1/admin/ar-models/3d-model")
     suspend fun submitArModelAsset(

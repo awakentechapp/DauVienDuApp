@@ -17,8 +17,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,12 +32,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,11 +58,13 @@ import io.github.sceneview.node.ModelNode
 import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberModelLoader
 import io.github.sceneview.rememberNodes
+import kotlinx.coroutines.launch
 
 @Composable
 fun ArModelLibraryDialog(
     isEnglish: Boolean,
     onLoadLibrary: suspend () -> List<ArModelLibraryItemDto>,
+    onDeleteModel: suspend (String) -> String?,
     onDismiss: () -> Unit
 ) {
     var library by remember { mutableStateOf<List<ArModelLibraryItemDto>>(emptyList()) }
@@ -67,6 +73,10 @@ fun ArModelLibraryDialog(
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var reloadToken by remember { mutableIntStateOf(0) }
     var previewItem by remember { mutableStateOf<ArModelLibraryItemDto?>(null) }
+    var deleteTarget by remember { mutableStateOf<ArModelLibraryItemDto?>(null) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+    var isDeleting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(reloadToken) {
         isLoading = true
@@ -199,7 +209,7 @@ fun ArModelLibraryDialog(
                                         Text(
                                             text = when (item.status.lowercase()) {
                                                 "ready" -> if (isEnglish) "Ready to place in AR" else "Sẵn sàng để đặt vào AR"
-                                                "processing" -> if (isEnglish) "Building 3D model…" else "Đang dựng mô hình 3D…"
+                                                "processing" -> if (isEnglish) "Building 3D model… Deletion is unavailable." else "Đang dựng mô hình 3D… Chưa thể xoá."
                                                 "failed" -> item.errorMessage ?: if (isEnglish) "Model creation failed" else "Dựng mô hình thất bại"
                                                 else -> item.status
                                             },
@@ -222,6 +232,22 @@ fun ArModelLibraryDialog(
                                             }
                                         }
                                     }
+                                    IconButton(
+                                        onClick = {
+                                            deleteTarget = item
+                                            deleteError = null
+                                        },
+                                        enabled = !isDeleting && !item.status.equals("Processing", true)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.DeleteOutline,
+                                            contentDescription = when {
+                                                item.status.equals("Processing", true) -> if (isEnglish) "Cannot delete while processing" else "Không thể xoá khi đang dựng"
+                                                else -> if (isEnglish) "Delete ${item.name}" else "Xoá ${item.name}"
+                                            },
+                                            tint = if (item.status.equals("Processing", true)) BrandColors.MutedText else BrandColors.Error
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -241,6 +267,57 @@ fun ArModelLibraryDialog(
             item = item,
             isEnglish = isEnglish,
             onDismiss = { previewItem = null }
+        )
+    }
+
+    deleteTarget?.let { item ->
+        AlertDialog(
+            onDismissRequest = { if (!isDeleting) deleteTarget = null },
+            title = {
+                Text(
+                    if (isEnglish) "Delete 3D object?" else "Xoá vật thể 3D?",
+                    color = BrandColors.PrimaryDeep,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (isEnglish) "Remove ‘${item.name}’ from the library? Models already placed in AR scenes will remain available."
+                        else "Xoá ‘${item.name}’ khỏi kho? Vật thể đã được đặt vào thẻ AR sẽ tiếp tục hoạt động.",
+                        color = BrandColors.Text
+                    )
+                    if (!deleteError.isNullOrBlank()) Text(deleteError.orEmpty(), color = BrandColors.Error)
+                    if (isDeleting) CircularProgressIndicator(color = BrandColors.Terracotta)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isDeleting,
+                    onClick = {
+                        isDeleting = true
+                        deleteError = null
+                        scope.launch {
+                            val error = runCatching { onDeleteModel(item.sourceModelId) }
+                                .getOrElse { it.localizedMessage ?: if (isEnglish) "Could not delete the object." else "Không thể xoá vật thể." }
+                            isDeleting = false
+                            if (error == null) {
+                                library = library.filterNot { it.sourceModelId == item.sourceModelId }
+                                deleteTarget = null
+                                reloadToken++
+                            } else {
+                                deleteError = error
+                            }
+                        }
+                    }
+                ) { Text(if (isEnglish) "Delete" else "Xoá", color = BrandColors.Error) }
+            },
+            dismissButton = {
+                TextButton(enabled = !isDeleting, onClick = { deleteTarget = null }) {
+                    Text(if (isEnglish) "Cancel" else "Huỷ", color = BrandColors.Primary)
+                }
+            },
+            containerColor = BrandColors.Paper
         )
     }
 }

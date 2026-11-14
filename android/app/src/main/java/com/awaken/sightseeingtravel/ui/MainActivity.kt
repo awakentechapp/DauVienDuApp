@@ -517,6 +517,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                     currentDestination = AppDestination.ACCOUNT_MANAGEMENT
                                 },
                                 onLoadArModelLibrary = viewModel::loadAdminArModelLibrary,
+                                onDeleteArModelAsset = viewModel::deleteAdminArModelAsset,
                                 onLogout = { viewModel.logout() }
                             )
                         }
@@ -1946,6 +1947,7 @@ private fun InfoAndProfileTabScreen(
     onOpenArModelCreation: () -> Unit,
     onOpenAccountManagement: (String) -> Unit,
     onLoadArModelLibrary: suspend () -> List<ArModelLibraryItemDto>,
+    onDeleteArModelAsset: suspend (String) -> String?,
     onLogout: () -> Unit
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
@@ -2250,6 +2252,7 @@ private fun InfoAndProfileTabScreen(
         ArModelLibraryDialog(
             isEnglish = isEn,
             onLoadLibrary = onLoadArModelLibrary,
+            onDeleteModel = onDeleteArModelAsset,
             onDismiss = { showArModelLibrary = false }
         )
     }

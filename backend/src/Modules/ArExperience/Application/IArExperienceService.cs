@@ -21,6 +21,10 @@ public interface IArExperienceService
     Task<Result<IReadOnlyList<ArModelLibraryItemDto>>> GetArModelCatalogAsync(
         CancellationToken ct = default);
 
+    Task<Result> DeleteArModelAssetAsync(
+        Guid modelId,
+        CancellationToken ct = default);
+
     Task<Result<AdminArInfoCardDto>> PlaceExistingModelAsync(
         Guid poiId,
         PlaceArModelRequest request,

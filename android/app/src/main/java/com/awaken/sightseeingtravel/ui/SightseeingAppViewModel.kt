@@ -30,6 +30,8 @@ import retrofit2.HttpException
 import java.io.File
 import java.net.SocketTimeoutException
 
+private const val MAX_AR_MODEL_UPLOAD_BYTES = 24L * 1024 * 1024
+
 /**
  * Unidirectional Data Flow (UDF) UI State for Sightseeing Travel AR Application.
  */
@@ -1302,6 +1304,29 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         return response.body().orEmpty()
     }
 
+    suspend fun deleteAdminArModelAsset(modelId: String): String? {
+        if (_uiState.value.currentUser?.isAdminOrSuperAdmin != true) {
+            return "Chỉ tài khoản Admin hoặc Super Admin mới được xoá vật thể AR 3D."
+        }
+
+        return try {
+            val response = apiService.deleteAdminArModelAsset(modelId)
+            if (!response.isSuccessful) {
+                return when (response.code()) {
+                    404 -> "Vật thể này không còn trong kho. Hãy tải lại danh sách."
+                    409 -> "Vật thể đang được dựng nên chưa thể xoá."
+                    else -> "Không thể xoá vật thể 3D (HTTP ${response.code()})."
+                }
+            }
+            _uiState.update { it.copy(statusBannerMessage = "Đã xoá vật thể khỏi kho 3D.") }
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.message ?: "Không thể xoá vật thể 3D. Vui lòng thử lại."
+        }
+    }
+
     suspend fun placeExistingArModel(
         poiId: String,
         request: PlaceArModelRequest
@@ -1355,8 +1380,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             return "Cần chụp từ 12 đến 32 ảnh trước khi dựng mô hình."
         }
         val totalBytes = imageFiles.sumOf { it.length() }
-        if (totalBytes > 120L * 1024 * 1024) {
-            return "Tổng dung lượng ảnh vượt 120 MB. Hãy bỏ bớt ảnh hoặc chụp lại ở độ phân giải thấp hơn."
+        if (totalBytes > MAX_AR_MODEL_UPLOAD_BYTES) {
+            return "Bộ ảnh vượt 24 MB sau khi tối ưu. Hãy bỏ bớt ảnh rồi thử lại."
         }
         if (imageFiles.any { !it.exists() || it.length() == 0L }) {
             return "Một số ảnh chụp không còn hợp lệ. Hãy chụp lại các ảnh đó."
@@ -1383,7 +1408,11 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 modelCategory.toRequestBody(textPlain)
             )
             if (!response.isSuccessful) {
-                return "Không gửi được ảnh để dựng mô hình (HTTP ${response.code()})."
+                return if (response.code() == 413) {
+                    "Máy chủ từ chối bộ ảnh vì vượt giới hạn dung lượng (HTTP 413). Hãy bỏ bớt ảnh rồi thử lại."
+                } else {
+                    "Không gửi được ảnh để dựng mô hình (HTTP ${response.code()})."
+                }
             }
 
             val body = response.body()
@@ -1465,8 +1494,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         if (imageFiles.size !in 12..32) {
             return "Cần chụp từ 12 đến 32 ảnh trước khi dựng mô hình."
         }
-        if (imageFiles.sumOf { it.length() } > 120L * 1024 * 1024) {
-            return "Tổng dung lượng ảnh vượt 120 MB. Hãy chụp lại ở độ phân giải thấp hơn."
+        if (imageFiles.sumOf { it.length() } > MAX_AR_MODEL_UPLOAD_BYTES) {
+            return "Bộ ảnh vượt 24 MB sau khi tối ưu. Hãy bỏ bớt ảnh rồi thử lại."
         }
         if (imageFiles.any { !it.exists() || it.length() == 0L }) {
             return "Một số ảnh chụp không còn hợp lệ. Hãy chụp lại các ảnh đó."
@@ -1488,7 +1517,11 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 modelCategory.toRequestBody(textPlain)
             )
             if (!response.isSuccessful) {
-                return "Không gửi được ảnh để tạo vật thể 3D (HTTP ${response.code()})."
+                return if (response.code() == 413) {
+                    "Máy chủ từ chối bộ ảnh vì vượt giới hạn dung lượng (HTTP 413). Hãy bỏ bớt ảnh rồi thử lại."
+                } else {
+                    "Không gửi được ảnh để tạo vật thể 3D (HTTP ${response.code()})."
+                }
             }
             val body = response.body()
                 ?: return "Máy chủ đã nhận yêu cầu nhưng không trả về trạng thái dựng mô hình."

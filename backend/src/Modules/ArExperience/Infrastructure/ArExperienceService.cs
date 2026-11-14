@@ -169,6 +169,42 @@ public sealed class ArExperienceService : IArExperienceService
         CancellationToken ct = default)
         => await GetArModelAssetsAsync(readyOnly: false, ct);
 
+    public async Task<Result> DeleteArModelAssetAsync(Guid modelId, CancellationToken ct = default)
+    {
+        var asset = await _dbContext.ArModelAssets
+            .FirstOrDefaultAsync(x => x.Id == modelId, ct);
+        if (asset is null)
+        {
+            return Result.Failure(new Error(
+                "AR_MODEL_NOT_FOUND",
+                "Không tìm thấy vật thể 3D trong kho.",
+                ErrorType.NotFound));
+        }
+
+        if (asset.ModelStatus.Equals("Processing", StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Failure(new Error(
+                "AR_MODEL_PROCESSING",
+                "Vật thể đang được dựng. Hãy đợi quá trình hoàn tất rồi xoá.",
+                ErrorType.Conflict));
+        }
+
+        var modelObjectKey = asset.ModelObjectKey;
+        var isPlacedInAr = !string.IsNullOrWhiteSpace(modelObjectKey) &&
+            await _dbContext.ArInfoCards.AnyAsync(x => x.ModelObjectKey == modelObjectKey, ct);
+
+        _dbContext.ArModelAssets.Remove(asset);
+        await _dbContext.SaveChangesAsync(ct);
+
+        // Placed AR cards share the model object key. Keep their underlying 3D file alive.
+        if (!isPlacedInAr && !string.IsNullOrWhiteSpace(modelObjectKey) && _objectStorageService is not null)
+        {
+            await _objectStorageService.DeleteObjectAsync(modelObjectKey, ct);
+        }
+
+        return Result.Success();
+    }
+
     private async Task<Result<IReadOnlyList<ArModelLibraryItemDto>>> GetArModelAssetsAsync(
         bool readyOnly,
         CancellationToken ct)
