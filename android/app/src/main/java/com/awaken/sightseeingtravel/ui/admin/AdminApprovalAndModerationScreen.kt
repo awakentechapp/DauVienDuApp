@@ -30,6 +30,7 @@ import coil.compose.AsyncImage
 import com.awaken.sightseeingtravel.core.model.*
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.BrandColors
+import com.awaken.sightseeingtravel.ui.map.PoiCoordinatePickerDialog
 import kotlinx.coroutines.launch
 import androidx.core.content.ContextCompat
 import java.io.File
@@ -1234,6 +1235,7 @@ private fun CreatePoiDialog(
         mutableStateOf(PoiCategoryLabels.normalize(initialPoi?.category))
     }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
+    var showCoordinatePicker by remember(initialPoi?.id) { mutableStateOf(false) }
     var latitudeText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.latitude?.let(::formatGpsCoordinate) ?: if (hasFreshGpsFix) formatGpsCoordinate(defaultLatitude) else "") }
     var longitudeText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.longitude?.let(::formatGpsCoordinate) ?: if (hasFreshGpsFix) formatGpsCoordinate(defaultLongitude) else "") }
     var radiusText by remember(initialPoi?.id) { mutableStateOf(initialPoi?.activationRadiusMeters?.toString() ?: "60") }
@@ -1364,6 +1366,14 @@ private fun CreatePoiDialog(
                         label = { Text("Longitude") },
                         modifier = Modifier.weight(1f)
                     )
+                }
+                OutlinedButton(
+                    onClick = { showCoordinatePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Chọn vị trí trên bản đồ")
                 }
                 FilledTonalButton(
                     onClick = {
@@ -1511,6 +1521,25 @@ private fun CreatePoiDialog(
             }
         }
     )
+
+    if (showCoordinatePicker) {
+        val pickerLatitude = parsedLatitude?.takeIf { it in -90.0..90.0 }
+            ?: defaultLatitude.takeIf { it.isFinite() && it in -90.0..90.0 }
+            ?: 10.7769
+        val pickerLongitude = parsedLongitude?.takeIf { it in -180.0..180.0 }
+            ?: defaultLongitude.takeIf { it.isFinite() && it in -180.0..180.0 }
+            ?: 106.7009
+        PoiCoordinatePickerDialog(
+            initialLatitude = pickerLatitude,
+            initialLongitude = pickerLongitude,
+            onDismiss = { showCoordinatePicker = false },
+            onConfirm = { latitude, longitude ->
+                latitudeText = formatGpsCoordinate(latitude)
+                longitudeText = formatGpsCoordinate(longitude)
+                showCoordinatePicker = false
+            }
+        )
+    }
 }
 
 private fun formatGpsCoordinate(value: Double): String =

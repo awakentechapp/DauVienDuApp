@@ -46,6 +46,7 @@ import com.awaken.sightseeingtravel.core.sensor.DeviceSpatialPose
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.BrandColors
 import com.google.ar.core.Pose
+import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.node.AnchorNode
@@ -71,6 +72,10 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0
 
@@ -104,9 +109,11 @@ fun ArCameraScreen(
     val modelLoader = rememberModelLoader(engine)
     val materialLoader = rememberMaterialLoader(engine)
     val childNodes = rememberNodes()
-    var arTargetsInstalled by remember(arContext.poiId) { mutableStateOf(false) }
+    var arCardTargetsInstalled by remember(arContext.poiId) { mutableStateOf(false) }
+    val installedPhotoTargetIds = remember(arContext.poiId) {
+        ConcurrentHashMap.newKeySet<String>()
+    }
     var photoBitmaps by remember { mutableStateOf<Map<String, Bitmap>>(emptyMap()) }
-    var photoBitmapsLoaded by remember { mutableStateOf(false) }
     val cardModelInstances = remember { mutableStateMapOf<String, ModelInstance>() }
     var cardModelsLoaded by remember(arContext.poiId) { mutableStateOf(false) }
     val imageLoader = remember(context) { context.imageLoader }
@@ -123,28 +130,39 @@ fun ArCameraScreen(
     val isWithinPoiZone = hasUsableGps &&
         distanceToPoiMeters <= arContext.activationRadiusMeters + 20.0
     val top10Photos = remember(arContext.highlightedCommunityPhotos) {
-        arContext.highlightedCommunityPhotos.filter { it.azimuthDegrees != null }.take(10)
+        arContext.highlightedCommunityPhotos.take(10)
     }
 
     LaunchedEffect(top10Photos) {
-        photoBitmapsLoaded = false
         photoBitmaps = emptyMap()
-        photoBitmaps = buildMap {
+        coroutineScope {
             top10Photos.forEach { photo ->
-                runCatching {
-                    val request = ImageRequest.Builder(context)
-                        .data(photo.thumbnailUrl ?: photo.imageUrl)
-                        .size(640, 480)
-                        .allowHardware(false)
-                        .build()
-                    val result = imageLoader.execute(request)
-                    result.drawable?.toBitmap(config = Bitmap.Config.ARGB_8888)?.let { source ->
-                        put(photo.id, createSpatialPhotoBitmap(source, photo.caption, photo.highlightRank ?: (top10Photos.indexOf(photo) + 1)))
+                launch {
+                    val bitmap = try {
+                        val request = ImageRequest.Builder(context)
+                            .data(photo.thumbnailUrl ?: photo.imageUrl)
+                            .size(640, 480)
+                            .allowHardware(false)
+                            .build()
+                        val result = imageLoader.execute(request)
+                        result.drawable?.toBitmap(config = Bitmap.Config.ARGB_8888)?.let { source ->
+                            createSpatialPhotoBitmap(
+                                source,
+                                photo.caption,
+                                photo.highlightRank ?: (top10Photos.indexOf(photo) + 1)
+                            )
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (bitmap != null) {
+                        photoBitmaps = photoBitmaps + (photo.id to bitmap)
                     }
                 }
             }
         }
-        photoBitmapsLoaded = true
     }
 
     val spatialCardBitmaps = remember(arContext.arInfoCards) {
@@ -163,11 +181,75 @@ fun ArCameraScreen(
         cardModelsLoaded = true
     }
 
+    LaunchedEffect(cardModelsLoaded) {
+        val has3dCards = arContext.arInfoCards.any { !it.modelUrl.isNullOrBlank() }
+        if (cardModelsLoaded && has3dCards && arCardTargetsInstalled) {
+            // Replace temporary info-card planes with available 3D models after model downloads finish.
+            childNodes.toList().forEach { runCatching { it.destroy() } }
+            childNodes.clear()
+            arCardTargetsInstalled = false
+            installedPhotoTargetIds.clear()
+        }
+    }
+
+    val addSpatialTarget: (Session, Pose, SpatialArImageTarget) -> Unit = { session, cameraPose, target ->
+        val anchorPose = createGeographicAnchorPose(
+            cameraPose = cameraPose,
+            originLatitude = spatialPose.latitude,
+            originLongitude = spatialPose.longitude,
+            originHeadingDegrees = effectiveAzimuth,
+            target = target
+        )
+        val anchorNode = AnchorNode(engine, session.createAnchor(anchorPose))
+        anchorNode.isTouchable = false
+        val spatialNode = target.modelInstance?.let { modelInstance ->
+            ModelNode(
+                modelInstance = modelInstance,
+                scaleToUnits = 1.2f,
+                centerOrigin = Position(y = -0.5f)
+            ).apply {
+                name = target.id
+                rotation = Rotation(
+                    y = LocationAndOrientationTracker.signedAngleDeltaDegrees(
+                        effectiveAzimuth,
+                        target.modelRotationDegrees
+                    )
+                )
+                isTouchable = true
+            }
+        } ?: target.bitmap?.let { bitmap ->
+            val height = (target.widthMeters * bitmap.height / bitmap.width)
+                .coerceIn(0.28f, 0.95f)
+            ImageNode(
+                materialLoader = materialLoader,
+                bitmap = bitmap,
+                size = Size(target.widthMeters, height)
+            ).apply {
+                name = target.id
+                isTouchable = true
+            }
+        }
+        if (spatialNode != null) anchorNode.addChildNode(spatialNode)
+        if (target.modelInstance != null && !target.label.isNullOrBlank()) {
+            val labelNode = ImageNode(
+                materialLoader = materialLoader,
+                bitmap = createSpatialModelLabelBitmap(target.label),
+                size = Size(1.5f, 0.28f)
+            ).apply {
+                position = Position(y = 1.45f)
+                isTouchable = false
+            }
+            anchorNode.addChildNode(labelNode)
+        }
+        childNodes.add(anchorNode)
+    }
+
     LaunchedEffect(isWithinPoiZone) {
         if (!isWithinPoiZone) {
             childNodes.toList().forEach { runCatching { it.destroy() } }
             childNodes.clear()
-            arTargetsInstalled = false
+            arCardTargetsInstalled = false
+            installedPhotoTargetIds.clear()
             selectedArCard = null
             selectedCommunityPhoto = null
         }
@@ -191,12 +273,10 @@ fun ArCameraScreen(
             planeRenderer = false,
             onSessionFailed = { error -> arSessionError = error.localizedMessage ?: error.javaClass.simpleName },
             onSessionUpdated = { session, frame ->
-                if (!arTargetsInstalled && isWithinPoiZone && photoBitmapsLoaded && cardModelsLoaded &&
-                    frame.camera.trackingState == TrackingState.TRACKING
-                ) {
-                    runCatching {
-                        val cameraPose = frame.camera.pose
-                        val targets = buildList {
+                if (isWithinPoiZone && frame.camera.trackingState == TrackingState.TRACKING) {
+                    val cameraPose = frame.camera.pose
+                    if (!arCardTargetsInstalled) {
+                        runCatching {
                             arContext.arInfoCards.forEach { card ->
                                 val (latitude, longitude) = destinationCoordinate(
                                     arContext.latitude,
@@ -205,23 +285,31 @@ fun ArCameraScreen(
                                     card.anchorDistanceMeters.toDouble()
                                 )
                                 val modelInstance = cardModelInstances[card.id]
-                                if (modelInstance != null) {
-                                    add(SpatialArImageTarget(
+                                val target = if (modelInstance != null) {
+                                    SpatialArImageTarget(
                                         "card:${card.id}", latitude, longitude, card.elevationMeters,
                                         0.88f,
                                         bitmap = null,
                                         modelInstance = modelInstance,
                                         label = card.title,
                                         modelRotationDegrees = card.modelRotationDegrees
-                                    ))
+                                    )
                                 } else {
-                                    spatialCardBitmaps[card.id]?.let { bitmap ->
-                                        add(SpatialArImageTarget("card:${card.id}", latitude, longitude, card.elevationMeters, 0.88f, bitmap))
-                                    }
+                                    SpatialArImageTarget(
+                                        "card:${card.id}", latitude, longitude, card.elevationMeters,
+                                        0.88f,
+                                        bitmap = spatialCardBitmaps[card.id]
+                                    )
                                 }
+                                addSpatialTarget(session, cameraPose, target)
                             }
-                            top10Photos.forEach { photo ->
-                                val bitmap = photoBitmaps[photo.id] ?: return@forEach
+                            arCardTargetsInstalled = true
+                        }.onFailure { arSessionError = it.localizedMessage ?: "Unable to create AR card anchors" }
+                    }
+                    top10Photos.forEachIndexed { index, photo ->
+                        val bitmap = photoBitmaps[photo.id]
+                        if (bitmap != null && photo.id !in installedPhotoTargetIds) {
+                            runCatching {
                                 val hasSavedCoordinates = photo.capturedLatitude in -90.0..90.0 &&
                                     photo.capturedLongitude in -180.0..180.0 &&
                                     (photo.capturedLatitude != 0.0 || photo.capturedLongitude != 0.0)
@@ -232,65 +320,22 @@ fun ArCameraScreen(
                                         arContext.latitude,
                                         arContext.longitude,
                                         photo.azimuthDegrees?.toDouble() ?: 0.0,
-                                        7.5 + (top10Photos.indexOf(photo).coerceAtLeast(0) % 3) * 1.5
+                                        7.5 + (index % 3) * 1.5
                                     )
                                 }
-                                add(SpatialArImageTarget("photo:${photo.id}", latitude, longitude, photo.elevationMeters, 0.82f, bitmap))
-                            }
-                        }
-                        targets.forEach { target ->
-                            val anchorPose = createGeographicAnchorPose(
-                                cameraPose = cameraPose,
-                                originLatitude = spatialPose.latitude,
-                                originLongitude = spatialPose.longitude,
-                                originHeadingDegrees = effectiveAzimuth,
-                                target = target
-                            )
-                            val anchorNode = AnchorNode(engine, session.createAnchor(anchorPose))
-                            anchorNode.isTouchable = false
-                            val spatialNode = target.modelInstance?.let { modelInstance ->
-                                ModelNode(
-                                    modelInstance = modelInstance,
-                                    scaleToUnits = 1.2f,
-                                    centerOrigin = Position(y = -0.5f)
-                                ).apply {
-                                    name = target.id
-                                    rotation = Rotation(
-                                        y = LocationAndOrientationTracker.signedAngleDeltaDegrees(
-                                            effectiveAzimuth,
-                                            target.modelRotationDegrees
-                                        )
+                                addSpatialTarget(
+                                    session,
+                                    cameraPose,
+                                    SpatialArImageTarget(
+                                        "photo:${photo.id}", latitude, longitude,
+                                        photo.elevationMeters, 0.82f, bitmap
                                     )
-                                    isTouchable = true
-                                }
-                            } ?: target.bitmap?.let { bitmap ->
-                                val height = (target.widthMeters * bitmap.height / bitmap.width)
-                                    .coerceIn(0.28f, 0.95f)
-                                ImageNode(
-                                    materialLoader = materialLoader,
-                                    bitmap = bitmap,
-                                    size = Size(target.widthMeters, height)
-                                ).apply {
-                                    name = target.id
-                                    isTouchable = true
-                                }
+                                )
+                                installedPhotoTargetIds.add(photo.id)
                             }
-                            if (spatialNode != null) anchorNode.addChildNode(spatialNode)
-                            if (target.modelInstance != null && !target.label.isNullOrBlank()) {
-                                val labelNode = ImageNode(
-                                    materialLoader = materialLoader,
-                                    bitmap = createSpatialModelLabelBitmap(target.label),
-                                    size = Size(1.5f, 0.28f)
-                                ).apply {
-                                    position = Position(y = 1.45f)
-                                    isTouchable = false
-                                }
-                                anchorNode.addChildNode(labelNode)
-                            }
-                            childNodes.add(anchorNode)
+                                .onFailure { arSessionError = it.localizedMessage ?: "Unable to create AR photo anchor" }
                         }
-                        arTargetsInstalled = true
-                    }.onFailure { arSessionError = it.localizedMessage ?: "Unable to create AR anchors" }
+                    }
                 }
 
             },
@@ -761,7 +806,7 @@ private fun SpatialRadarHud(
 
         // Top 10 Highlighted Community Photos (Gold dots)
         topPhotos.forEach { photo ->
-            val photoAzimuth = photo.azimuthDegrees ?: return@forEach
+            val photoAzimuth = photo.azimuthDegrees ?: 0.0f
             val relDeg = LocationAndOrientationTracker.signedAngleDeltaDegrees(viewerAzimuth, photoAzimuth)
             val rad = Math.toRadians((relDeg - 90f).toDouble())
             val dotX = center.x + (cos(rad) * radius * 0.72f).toFloat()
