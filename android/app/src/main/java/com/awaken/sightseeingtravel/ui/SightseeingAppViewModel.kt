@@ -81,8 +81,8 @@ data class ActiveNavigationRoute(
 class SightseeingAppViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
-        const val SEARCH_RADIUS_KM = 50.0
-        const val SEARCH_RADIUS_METERS = 50_000.0
+        const val SEARCH_RADIUS_KM = 15.0
+        const val SEARCH_RADIUS_METERS = 15_000.0
     }
 
     val tokenStore = TokenStore(application)
@@ -382,7 +382,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     }
 
     // ========================================================================
-    // 2. NEARBY POIs WITHIN 50KM RADIUS, CULTURAL STORY & SPATIAL AR CONTEXT
+    // 2. NEARBY POIs WITHIN 15KM RADIUS, CULTURAL STORY & SPATIAL AR CONTEXT
     // ========================================================================
 
     fun loadNearbyPois(
@@ -1702,7 +1702,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
 
     /**
      * SuperAdmin ONLY: Approves a `PendingApproval` POI -> transitions to `Published`
-     * and makes it immediately visible on the Tourist OpenFreeMap/Bright map within 50km.
+     * and makes it immediately visible on the Tourist OpenFreeMap/Bright map within 15km.
      */
     fun approvePoiAsSuperAdmin(poiId: String, reviewNotes: String = "Approved by SuperAdmin") {
         val user = _uiState.value.currentUser
@@ -1866,19 +1866,19 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     }
 
     // ========================================================================
-    // 5. BUILT-IN HERITAGE & FOOD ("ĂN UỐNG") SEED DATA WITHIN 50KM RADIUS
+    // 5. BUILT-IN HERITAGE & FOOD ("ĂN UỐNG") SEED DATA WITHIN 15KM RADIUS
     // ========================================================================
 
     private fun buildSeedNearbyPois(lat: Double, lng: Double, lang: String): List<PoiPinSummaryDto> {
         val isEn = lang.equals("en", ignoreCase = true)
 
-        // If the user's current GPS is more than 45km away from downtown HCMC (10.7769, 106.7009),
-        // anchor the seed coordinates relative to the user's current region so all POIs are within 50km.
+        // Rebase debug seed pins when the user is more than 12km from downtown HCMC.
+        // Their small offsets keep the seed POIs inside the 15km search radius.
         val distToDefaultCenter = LocationAndOrientationTracker.calculateDistanceMeters(
             lat, lng, 10.7769, 106.7009
         )
-        val baseLat = if (distToDefaultCenter > 45_000.0) lat else 10.7769
-        val baseLng = if (distToDefaultCenter > 45_000.0) lng else 106.7009
+        val baseLat = if (distToDefaultCenter > 12_000.0) lat else 10.7769
+        val baseLng = if (distToDefaultCenter > 12_000.0) lng else 106.7009
 
         val rawPins = listOf(
             // --- CULTURAL & HISTORICAL LANDMARKS ---
@@ -2210,7 +2210,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 if (isEn) {
                     """
                     ### Culinary Heritage & Cultural Story
-                    **${summaryPin.title}** is one of the most iconic culinary stops within your **50km sightseeing zone**.
+                    **${summaryPin.title}** is one of the most iconic culinary stops within your **15km sightseeing zone**.
                     
                     - **Category**: Food & Dining (`Ăn uống`)
                     - **Specialty**: Heirloom Vietnamese flavors prepared with fresh local ingredients
@@ -2219,7 +2219,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 } else {
                     """
                     ### Câu chuyện Văn hóa Ẩm thực & Nguồn gốc
-                    **${summaryPin.title}** là điểm đến **Ăn uống** tiêu biểu nằm trong bán kính **50km** quanh vị trí hiện tại của bạn.
+                    **${summaryPin.title}** là điểm đến **Ăn uống** tiêu biểu nằm trong bán kính **15km** quanh vị trí hiện tại của bạn.
                     
                     - **Danh mục**: Ăn uống (`Ẩm thực truyền thống`)
                     - **Đặc trưng**: Lưu giữ hương vị nguyên bản nhiều thế hệ cùng không gian thưởng thức đậm bản sắc địa phương
@@ -2230,7 +2230,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 if (isEn) {
                     """
                     ### Cultural & Architectural Story
-                    Located within your **50km sightseeing zone**, **${summaryPin.title}** stands as an architectural and historical symbol.
+                    Located within your **15km sightseeing zone**, **${summaryPin.title}** stands as an architectural and historical symbol.
                     
                     - **Category**: ${summaryPin.category}
                     - **Spatial AR Experience**: Step within the activation zone (`${(summaryPin.activationRadiusMeters + 20).toInt()}m`) and open the **AR Camera** to inspect 360° historical cards and the **Top 10 Highlighted Community Photos** anchored around the monument.
@@ -2238,7 +2238,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 } else {
                     """
                     ### Câu chuyện Văn hóa & Lịch sử
-                    Nằm trong vùng khám phá bán kính **50km** của bạn, **${summaryPin.title}** là biểu tượng giao thoa kiến trúc và ký ức văn hóa lịch sử.
+                    Nằm trong vùng khám phá bán kính **15km** của bạn, **${summaryPin.title}** là biểu tượng giao thoa kiến trúc và ký ức văn hóa lịch sử.
                     
                     - **Danh mục**: ${summaryPin.category}
                     - **Trải nghiệm Không gian Thực tế ảo Tăng cường (AR)**: Khi tiến vào bán kính kích hoạt (`${(summaryPin.activationRadiusMeters + 20).toInt()}m`), hãy mở **Camera AR** để khám phá các thẻ thông tin văn hóa 360° và **Top 10 bức ảnh nổi bật của cộng đồng** gắn trực tiếp trong không gian thực.

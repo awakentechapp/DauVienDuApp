@@ -69,7 +69,7 @@ private enum class AppDestination {
 /**
  * 4 Main Bottom Navigation Tabs:
  * 1. Trang chủ (HOME)
- * 2. Địa điểm (PLACES - includes Văn hóa & Ăn uống within 50km radius)
+ * 2. Địa điểm (PLACES - includes Văn hóa & Ăn uống within 15km radius)
  * 3. Khám phá (EXPLORE - OpenFreeMap/Bright GPS Map + AR experience)
  * 4. Thông tin (INFO)
  */
@@ -86,7 +86,7 @@ private enum class MainBottomTab(
 
 /**
  * Main Entry Activity for the Sightseeing Travel AR Android Application.
- * - 4 Bottom Tabs: Trang chủ, Địa điểm (Văn hóa & Ăn uống trong bán kính 50km), Khám phá (OpenFreeMap/Bright + AR), Thông tin
+ * - 4 Bottom Tabs: Trang chủ, Địa điểm (Văn hóa & Ăn uống trong bán kính 15km), Khám phá (OpenFreeMap/Bright + AR), Thông tin
  * - User roles come from the authenticated API profile.
  */
 class MainActivity : ComponentActivity() {
@@ -908,7 +908,7 @@ private fun HomeTabScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // Section 1: Food & Dining ("Ăn uống") within 50km
+        // Section 1: Food & Dining ("Ăn uống") within 15km
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -917,7 +917,7 @@ private fun HomeTabScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (isEn) "Food & Dining Within 50km (Ăn uống)" else "Địa Điểm Ăn Uống Quanh Bạn (≤ 50km)",
+                text = if (isEn) "Food & Dining Within 15km (Ăn uống)" else "Địa Điểm Ăn Uống Quanh Bạn (≤ 15km)",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 17.sp,
                 color = BrandColors.Text
@@ -944,7 +944,7 @@ private fun HomeTabScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Section 2: Cultural & Heritage Landmarks within 50km
+        // Section 2: Cultural & Heritage Landmarks within 15km
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -953,7 +953,7 @@ private fun HomeTabScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (isEn) "Cultural Heritage Within 50km" else "Địa Danh Văn Hóa & Lịch Sử (≤ 50km)",
+                text = if (isEn) "Cultural Heritage Within 15km" else "Địa Danh Văn Hóa & Lịch Sử (≤ 15km)",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 17.sp,
                 color = BrandColors.Text
@@ -1029,7 +1029,7 @@ private fun PoiFeaturedHorizontalCard(
                         text = if (isUnlocked) {
                             if (isEn) "AR Ready (${formatDistanceLabel(dist)})" else "Mở AR (${formatDistanceLabel(dist)})"
                         } else {
-                            "${formatDistanceLabel(dist)} • ≤50km"
+                            "${formatDistanceLabel(dist)} • ≤15km"
                         },
                         color = Color.White,
                         fontSize = 11.sp,
@@ -1139,7 +1139,7 @@ private fun HomeStatCard(
 }
 
 // ============================================================================
-// TAB 2: ĐỊA ĐIỂM (PLACES DIRECTORY TAB - VĂN HÓA & ĂN UỐNG TRONG BÁN KÍNH 50KM)
+// TAB 2: ĐỊA ĐIỂM (PLACES DIRECTORY TAB - VĂN HÓA & ĂN UỐNG TRONG BÁN KÍNH 15KM)
 // ============================================================================
 
 @Composable
@@ -1201,8 +1201,8 @@ private fun PlacesDirectoryTabScreen(
         mutableStateOf(normalizePlacesFilter(initialCategory))
     }
 
-    // Filter all POIs strictly within 50km (50,000 meters) of current location
-    val poisWithin50Km = uiState.nearbyPois.map { pin ->
+    // Filter all POIs strictly within 15km (15,000 meters) of current location
+    val poisWithin15Km = uiState.nearbyPois.map { pin ->
         val dist = LocationAndOrientationTracker.calculateDistanceMeters(
             spatialPose.latitude,
             spatialPose.longitude,
@@ -1214,15 +1214,15 @@ private fun PlacesDirectoryTabScreen(
         .sortedBy { it.distanceMeters ?: Double.MAX_VALUE }
     val hasUsableGps = spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f
     val categoryCounts = PoiCategoryLabels.values.associateWith { category ->
-        poisWithin50Km.count { PoiCategoryLabels.normalize(it.category) == category }
+        poisWithin15Km.count { PoiCategoryLabels.normalize(it.category) == category }
     }
     val arReadyCount = if (hasUsableGps) {
-        poisWithin50Km.count { pin -> pin.canUnlockAr(pin.distanceMeters ?: Double.MAX_VALUE) }
+        poisWithin15Km.count { pin -> pin.canUnlockAr(pin.distanceMeters ?: Double.MAX_VALUE) }
     } else {
         0
     }
 
-    val filteredPois = poisWithin50Km.filter { pin ->
+    val filteredPois = poisWithin15Km.filter { pin ->
         val matchesSearch = searchQuery.isBlank() ||
             pin.title.contains(searchQuery, ignoreCase = true) ||
             pin.shortSummary.contains(searchQuery, ignoreCase = true) ||
@@ -1319,7 +1319,7 @@ private fun PlacesDirectoryTabScreen(
                         selected = selectedCategory == "ALL",
                         label = if (isEn) "All places" else "Tất cả",
                         icon = "📍",
-                        count = poisWithin50Km.size,
+                        count = poisWithin15Km.size,
                         accent = BrandColors.Primary,
                         onClick = {
                             selectedCategory = "ALL"
@@ -1373,7 +1373,7 @@ private fun PlacesDirectoryTabScreen(
             }
         }
 
-        // Places List within 50km
+        // Places List within 15km
         LazyColumn(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1436,7 +1436,7 @@ private fun PlacesDirectoryTabScreen(
                                     text = if (unlocked) {
                                         if (isEn) "AR Unlocked • ${formatDistanceLabel(liveDist)}" else "Mở khóa AR • ${formatDistanceLabel(liveDist)}"
                                     } else {
-                                        if (isEn) "${formatDistanceLabel(liveDist)} (≤ 50km)" else "Cách ${formatDistanceLabel(liveDist)} (≤ 50km)"
+                                        if (isEn) "${formatDistanceLabel(liveDist)} (≤ 15km)" else "Cách ${formatDistanceLabel(liveDist)} (≤ 15km)"
                                     },
                                     color = Color.White,
                                     fontSize = 11.sp,
@@ -1531,7 +1531,7 @@ private fun PlacesDirectoryTabScreen(
 }
 
 // ============================================================================
-// TAB 3: KHÁM PHÁ (EXPLORE MAP & AR TAB - OPENFREEMAP/BRIGHT + 50KM RADIUS)
+// TAB 3: KHÁM PHÁ (EXPLORE MAP & AR TAB - OPENFREEMAP/BRIGHT + 15KM RADIUS)
 // ============================================================================
 
 @Composable

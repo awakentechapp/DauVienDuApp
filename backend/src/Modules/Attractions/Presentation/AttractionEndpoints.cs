@@ -27,7 +27,7 @@ public static class AttractionEndpoints
             var result = await attractionService.GetNearbyPoisAsync(
                 lat,
                 lng,
-                radiusKm ?? 50.0,
+                radiusKm ?? 15.0,
                 lang,
                 cancellationToken);
 

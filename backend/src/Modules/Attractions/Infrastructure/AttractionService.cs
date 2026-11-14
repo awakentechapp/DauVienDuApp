@@ -33,7 +33,7 @@ public sealed class AttractionService : IAttractionService
     public async Task<Result<NearbyPoisResponse>> GetNearbyPoisAsync(
         double latitude,
         double longitude,
-        double radiusKm = 10.0,
+        double radiusKm = 15.0,
         string? languageCode = null,
         CancellationToken cancellationToken = default)
     {
@@ -45,7 +45,7 @@ public sealed class AttractionService : IAttractionService
                 ErrorType.Validation));
         }
 
-        var normalizedRadiusKm = Math.Clamp(radiusKm <= 0 ? 10.0 : radiusKm, 0.1, 200.0);
+        var normalizedRadiusKm = Math.Clamp(radiusKm <= 0 ? 15.0 : radiusKm, 0.1, 15.0);
         var maxDistanceMeters = normalizedRadiusKm * 1000.0;
         var (minLat, maxLat, minLng, maxLng) = GeoCalculator.CalculateBoundingBox(
             latitude,

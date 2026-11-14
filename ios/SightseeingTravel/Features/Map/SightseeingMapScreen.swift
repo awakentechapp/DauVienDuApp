@@ -18,7 +18,7 @@ public struct SightseeingMapScreen: View {
     @State private var selectedPoi: NearbyPoiDto?
     @State private var arActivePoi: NearbyPoiDto?
     @State private var searchText: String = ""
-    @State private var searchRadiusKm: Double = 50.0
+    @State private var searchRadiusKm: Double = 15.0
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
 

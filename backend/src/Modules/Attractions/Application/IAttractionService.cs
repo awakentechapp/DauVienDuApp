@@ -7,7 +7,7 @@ public interface IAttractionService
     Task<Result<NearbyPoisResponse>> GetNearbyPoisAsync(
         double latitude,
         double longitude,
-        double radiusKm = 10.0,
+        double radiusKm = 15.0,
         string? languageCode = null,
         CancellationToken cancellationToken = default);
 

@@ -150,7 +150,7 @@ public actor APIClient {
     public func getNearbyPois(
         lat: Double,
         lng: Double,
-        radiusKm: Double = 10.0,
+        radiusKm: Double = 15.0,
         lang: AppLanguage
     ) async throws -> [NearbyPoiDto] {
         let queryItems = [

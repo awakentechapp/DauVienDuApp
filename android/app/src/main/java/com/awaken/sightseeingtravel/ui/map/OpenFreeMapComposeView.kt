@@ -51,7 +51,7 @@ private const val MAP_3D_DEFAULT_TILT_DEGREES = 55.0
  * - Vector tile style: `OpenFreeMap/Liberty` with 3D building extrusion
  * - Default camera tilt: 55 degrees so 3D buildings are visible at close zoom levels
  * - Automatic OpenStreetMap Raster Tile JSON fallback if vector tiles are unreachable
- * - Real-time GPS Location Marker + Published POI Heritage & Food (`Ăn uống`) Pins within 50km radius
+ * - Real-time GPS Location Marker + Published POI Heritage & Food (`Ăn uống`) Pins within 15km radius
  */
 @Composable
 fun OpenFreeMapComposeView(

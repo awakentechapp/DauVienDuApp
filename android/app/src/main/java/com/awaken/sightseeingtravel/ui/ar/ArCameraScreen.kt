@@ -73,6 +73,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.atan2
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -109,6 +110,9 @@ fun ArCameraScreen(
     val modelLoader = rememberModelLoader(engine)
     val materialLoader = rememberMaterialLoader(engine)
     val childNodes = rememberNodes()
+    val billboardNodes = remember(arContext.poiId) {
+        ConcurrentHashMap<String, ImageNode>()
+    }
     var arCardTargetsInstalled by remember(arContext.poiId) { mutableStateOf(false) }
     val installedPhotoTargetIds = remember(arContext.poiId) {
         ConcurrentHashMap.newKeySet<String>()
@@ -187,6 +191,7 @@ fun ArCameraScreen(
             // Replace temporary info-card planes with available 3D models after model downloads finish.
             childNodes.toList().forEach { runCatching { it.destroy() } }
             childNodes.clear()
+            billboardNodes.clear()
             arCardTargetsInstalled = false
             installedPhotoTargetIds.clear()
         }
@@ -229,7 +234,13 @@ fun ArCameraScreen(
                 isTouchable = true
             }
         }
-        if (spatialNode != null) anchorNode.addChildNode(spatialNode)
+        if (spatialNode != null) {
+            anchorNode.addChildNode(spatialNode)
+            if (spatialNode is ImageNode) {
+                // Keep the geographic anchor fixed; only turn its image plane toward the visitor.
+                billboardNodes[target.id] = spatialNode
+            }
+        }
         if (target.modelInstance != null && !target.label.isNullOrBlank()) {
             val labelNode = ImageNode(
                 materialLoader = materialLoader,
@@ -248,6 +259,7 @@ fun ArCameraScreen(
         if (!isWithinPoiZone) {
             childNodes.toList().forEach { runCatching { it.destroy() } }
             childNodes.clear()
+            billboardNodes.clear()
             arCardTargetsInstalled = false
             installedPhotoTargetIds.clear()
             selectedArCard = null
@@ -334,6 +346,21 @@ fun ArCameraScreen(
                                 installedPhotoTargetIds.add(photo.id)
                             }
                                 .onFailure { arSessionError = it.localizedMessage ?: "Unable to create AR photo anchor" }
+                        }
+                    }
+
+                    // The anchor position stays fixed in ARCore world space. Billboarding only
+                    // changes the image plane's facing direction; its meter-based size lets the
+                    // camera perspective make it larger nearby and smaller farther away.
+                    val cameraTranslation = cameraPose.translation
+                    billboardNodes.values.forEach { imageNode ->
+                        val imagePosition = imageNode.worldPosition
+                        val deltaX = cameraTranslation[0] - imagePosition.x
+                        val deltaZ = cameraTranslation[2] - imagePosition.z
+                        if (deltaX * deltaX + deltaZ * deltaZ > 0.04f) {
+                            imageNode.worldRotation = Rotation(
+                                y = Math.toDegrees(atan2(deltaX.toDouble(), deltaZ.toDouble())).toFloat()
+                            )
                         }
                     }
                 }

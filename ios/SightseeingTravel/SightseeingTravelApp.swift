@@ -315,7 +315,7 @@ public struct HomePortalView: View {
                 featuredPois = (try? await APIClient.shared.getNearbyPois(
                     lat: locationManager.latitude,
                     lng: locationManager.longitude,
-                    radiusKm: 50.0,
+                    radiusKm: 15.0,
                     lang: appState.selectedLanguage
                 )) ?? []
             }
@@ -553,12 +553,12 @@ public struct PlacesDirectoryView: View {
                     ? "Tìm tên địa danh, lịch sử, danh mục..."
                     : "Search place name, history, category..."
             )
-            .navigationTitle(appState.selectedLanguage == .vi ? "Địa Điểm & Ăn Uống (50km)" : "Places & Dining (50km)")
+            .navigationTitle(appState.selectedLanguage == .vi ? "Địa Điểm & Ăn Uống (15km)" : "Places & Dining (15km)")
             .task(id: appState.selectedLanguage) {
                 allPois = (try? await APIClient.shared.getNearbyPois(
                     lat: locationManager.latitude,
                     lng: locationManager.longitude,
-                    radiusKm: 50.0,
+                    radiusKm: 15.0,
                     lang: appState.selectedLanguage
                 )) ?? []
             }

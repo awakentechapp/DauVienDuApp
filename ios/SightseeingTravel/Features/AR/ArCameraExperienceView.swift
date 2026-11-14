@@ -52,8 +52,14 @@ public struct ArCameraExperienceView: View {
             ArSceneKitContainerView(
                 arInfoCards: isWithinPoiZone ? (arContext?.arInfoCards ?? []) : [],
                 highlightedPhotos: isWithinPoiZone
-                    ? Array((arContext?.highlightedCommunityPhotos ?? []).filter { $0.azimuthDegrees != nil }.prefix(10))
+                    ? Array((arContext?.highlightedCommunityPhotos ?? []).filter {
+                        $0.azimuthDegrees != nil || $0.capturedLatitude != 0 || $0.capturedLongitude != 0
+                    }.prefix(10))
                     : [],
+                poiLatitude: poi.latitude,
+                poiLongitude: poi.longitude,
+                viewerLatitude: locationManager.latitude,
+                viewerLongitude: locationManager.longitude,
                 triggerSnapshotRequest: $triggerSnapshotRequest,
                 onNodeTapped: { tappedItem in
                     guard isWithinPoiZone else { return }
@@ -497,12 +503,20 @@ public struct ArCameraExperienceView: View {
 private struct ArSceneKitContainerView: UIViewRepresentable {
     let arInfoCards: [ArInfoCardDto]
     let highlightedPhotos: [CommunityPhotoDto]
+    let poiLatitude: Double
+    let poiLongitude: Double
+    let viewerLatitude: Double
+    let viewerLongitude: Double
     @Binding var triggerSnapshotRequest: Bool
     let onNodeTapped: (SelectedArOverlayItem) -> Void
     let onSnapshotCaptured: (UIImage) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onNodeTapped: onNodeTapped)
+        Coordinator(
+            onNodeTapped: onNodeTapped,
+            poiLatitude: poiLatitude,
+            poiLongitude: poiLongitude
+        )
     }
 
     func makeUIView(context: Context) -> ARSCNView {
@@ -533,7 +547,9 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
         context.coordinator.onNodeTapped = onNodeTapped
         context.coordinator.syncSpatialNodes(
             infoCards: arInfoCards,
-            highlightedPhotos: highlightedPhotos
+            highlightedPhotos: highlightedPhotos,
+            viewerLatitude: viewerLatitude,
+            viewerLongitude: viewerLongitude
         )
 
         if triggerSnapshotRequest {
@@ -554,21 +570,39 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
     final class Coordinator: NSObject, ARSCNViewDelegate {
         weak var sceneView: ARSCNView?
         var onNodeTapped: (SelectedArOverlayItem) -> Void
+        private let poiLatitude: Double
+        private let poiLongitude: Double
 
         private var renderedSignature: String = ""
         private var nodeMap: [String: SelectedArOverlayItem] = [:]
 
-        init(onNodeTapped: @escaping (SelectedArOverlayItem) -> Void) {
+        init(
+            onNodeTapped: @escaping (SelectedArOverlayItem) -> Void,
+            poiLatitude: Double,
+            poiLongitude: Double
+        ) {
             self.onNodeTapped = onNodeTapped
+            self.poiLatitude = poiLatitude
+            self.poiLongitude = poiLongitude
         }
 
         func syncSpatialNodes(
             infoCards: [ArInfoCardDto],
-            highlightedPhotos: [CommunityPhotoDto]
+            highlightedPhotos: [CommunityPhotoDto],
+            viewerLatitude: Double,
+            viewerLongitude: Double
         ) {
             guard let sceneView = sceneView else { return }
             let newSignature = infoCards.map(\.id).joined(separator: ",") + "|" + highlightedPhotos.map(\.id).joined(separator: ",")
             guard newSignature != renderedSignature else { return }
+            guard let currentFrame = sceneView.session.currentFrame,
+                  currentFrame.camera.trackingState == .normal else { return }
+            let cameraTranslation = currentFrame.camera.transform.columns.3
+            let cameraPosition = SCNVector3(
+                cameraTranslation.x,
+                cameraTranslation.y,
+                cameraTranslation.z
+            )
             renderedSignature = newSignature
 
             // Remove previous spatial nodes
@@ -577,7 +611,9 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
                 .forEach { $0.removeFromParentNode() }
             nodeMap.removeAll()
 
-            // 1. Place 3D AR Cultural Info Cards using azimuthDegrees, distanceMeters, elevationMeters
+            // gravityAndHeading gives SceneKit an east/up/south coordinate system. Convert each
+            // stored POI-relative position to a geographic point, then offset from the viewer's
+            // current GPS and AR camera pose. Once added, each node remains fixed in session space.
             for card in infoCards {
                 let nodeName = "ar_item_card_\(card.id)"
                 nodeMap[nodeName] = .infoCard(card)
@@ -596,24 +632,28 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
                 billboard.freeAxes = [.Y]
                 node.constraints = [billboard]
 
-                let clampedDist = max(2.2, min(12.0, card.distanceMeters))
-                let rad = Float(card.azimuthDegrees * .pi / 180.0)
-                let x = Float(clampedDist) * sin(rad)
-                let z = -Float(clampedDist) * cos(rad)
-                let y = Float(card.elevationMeters)
-
-                node.position = SCNVector3(x, y, z)
+                let target = Self.destinationCoordinate(
+                    latitude: poiLatitude,
+                    longitude: poiLongitude,
+                    bearingDegrees: card.azimuthDegrees,
+                    distanceMeters: card.distanceMeters
+                )
+                node.position = Self.scenePosition(
+                    latitude: target.latitude,
+                    longitude: target.longitude,
+                    elevationMeters: card.elevationMeters,
+                    viewerLatitude: viewerLatitude,
+                    viewerLongitude: viewerLongitude,
+                    cameraPosition: cameraPosition
+                )
                 sceneView.scene.rootNode.addChildNode(node)
             }
 
-            // 2. Place Floating 3D Frames for Top 10 Highlighted Community Photos around the user
+            // 2. Pin each community image to its captured GPS point; old photos without GPS use
+            // their saved bearing as a POI-relative fallback.
             for (index, photo) in highlightedPhotos.enumerated() {
                 let nodeName = "ar_item_photo_\(photo.id)"
                 nodeMap[nodeName] = .communityPhoto(photo)
-
-                guard let azimuth = photo.azimuthDegrees else { continue }
-                let distance: Double = 3.4
-                let elevation: Double = (index % 2 == 0) ? 0.55 : -0.25
 
                 let placeholderImg = Self.renderPhotoBillboardTexture(photo: photo, downloadedImage: nil)
                 let plane = SCNPlane(width: 1.05, height: 1.15)
@@ -629,10 +669,32 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
                 billboard.freeAxes = [.Y]
                 node.constraints = [billboard]
 
-                let rad = Float(azimuth * .pi / 180.0)
-                let x = Float(distance) * sin(rad)
-                let z = -Float(distance) * cos(rad)
-                node.position = SCNVector3(x, Float(elevation), z)
+                let hasSavedCoordinates = photo.capturedLatitude >= -90.0 &&
+                    photo.capturedLatitude <= 90.0 &&
+                    photo.capturedLongitude >= -180.0 &&
+                    photo.capturedLongitude <= 180.0 &&
+                    (photo.capturedLatitude != 0 || photo.capturedLongitude != 0)
+                let target: (latitude: Double, longitude: Double)
+                if hasSavedCoordinates {
+                    target = (photo.capturedLatitude, photo.capturedLongitude)
+                } else if let azimuth = photo.azimuthDegrees {
+                    target = Self.destinationCoordinate(
+                        latitude: poiLatitude,
+                        longitude: poiLongitude,
+                        bearingDegrees: azimuth,
+                        distanceMeters: 7.5 + Double(index % 3) * 1.5
+                    )
+                } else {
+                    continue
+                }
+                node.position = Self.scenePosition(
+                    latitude: target.latitude,
+                    longitude: target.longitude,
+                    elevationMeters: 1.5,
+                    viewerLatitude: viewerLatitude,
+                    viewerLongitude: viewerLongitude,
+                    cameraPosition: cameraPosition
+                )
 
                 sceneView.scene.rootNode.addChildNode(node)
 
@@ -652,6 +714,57 @@ private struct ArSceneKitContainerView: UIViewRepresentable {
                     }
                 }
             }
+        }
+
+        private static let earthRadiusMeters = 6_371_000.0
+
+        private static func destinationCoordinate(
+            latitude: Double,
+            longitude: Double,
+            bearingDegrees: Double,
+            distanceMeters: Double
+        ) -> (latitude: Double, longitude: Double) {
+            let angularDistance = max(0, distanceMeters) / earthRadiusMeters
+            let bearing = bearingDegrees * .pi / 180.0
+            let latitude1 = latitude * .pi / 180.0
+            let longitude1 = longitude * .pi / 180.0
+            let latitude2 = asin(
+                sin(latitude1) * cos(angularDistance) +
+                    cos(latitude1) * sin(angularDistance) * cos(bearing)
+            )
+            let longitude2 = longitude1 + atan2(
+                sin(bearing) * sin(angularDistance) * cos(latitude1),
+                cos(angularDistance) - sin(latitude1) * sin(latitude2)
+            )
+            let normalizedLongitude = (longitude2 * 180.0 / .pi + 540.0)
+                .truncatingRemainder(dividingBy: 360.0) - 180.0
+            return (
+                latitude2 * 180.0 / .pi,
+                normalizedLongitude
+            )
+        }
+
+        private static func scenePosition(
+            latitude: Double,
+            longitude: Double,
+            elevationMeters: Double,
+            viewerLatitude: Double,
+            viewerLongitude: Double,
+            cameraPosition: SCNVector3
+        ) -> SCNVector3 {
+            let meanLatitude = (latitude + viewerLatitude) * 0.5 * .pi / 180.0
+            let northMeters = (latitude - viewerLatitude) * .pi / 180.0 * earthRadiusMeters
+            let longitudeDelta = (longitude - viewerLongitude) * .pi / 180.0
+            let eastMeters = longitudeDelta * earthRadiusMeters * cos(meanLatitude)
+
+            // ARKit gravityAndHeading axes point east (+X), up (+Y), and south (+Z).
+            // Add the geographic offset to the camera's current world pose. After installation,
+            // SceneKit keeps this node fixed while the user and camera move around it.
+            return SCNVector3(
+                cameraPosition.x + Float(eastMeters),
+                cameraPosition.y + Float(elevationMeters - 1.5),
+                cameraPosition.z - Float(northMeters)
+            )
         }
 
         @objc func handleSceneTap(_ recognizer: UITapGestureRecognizer) {
