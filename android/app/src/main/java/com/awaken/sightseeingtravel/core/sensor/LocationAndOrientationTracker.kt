@@ -1,14 +1,19 @@
 package com.awaken.sightseeingtravel.core.sensor
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
+import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.google.android.gms.location.*
+import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +29,7 @@ data class DeviceSpatialPose(
     val accuracyMeters: Float = 12.0f,
     val hasLiveGpsFix: Boolean = false,
     val locationFixTimeMillis: Long = 0L,
+    val locationFixElapsedRealtimeNanos: Long = 0L,
     val isSimulatedLocation: Boolean = false,
     val speedMetersPerSecond: Float = 0f,
     val azimuthDegrees: Float = 0f, // 0..360 (0=N, 90=E, 180=S, 270=W)
@@ -31,11 +37,19 @@ data class DeviceSpatialPose(
     val pitchDegrees: Float = 0f,   // Up/Down camera tilt (-90..+90)
     val rollDegrees: Float = 0f
 ) {
-    val hasFreshGpsFix: Boolean
+    val locationFixAgeMillis: Long
         get() {
-            val ageMillis = System.currentTimeMillis() - locationFixTimeMillis
-            return hasLiveGpsFix && ageMillis in 0L..30_000L
+            if (!hasLiveGpsFix) return Long.MAX_VALUE
+            if (locationFixElapsedRealtimeNanos > 0L) {
+                val ageNanos = SystemClock.elapsedRealtimeNanos() - locationFixElapsedRealtimeNanos
+                return if (ageNanos >= 0L) ageNanos / 1_000_000L else Long.MAX_VALUE
+            }
+            val wallClockAge = System.currentTimeMillis() - locationFixTimeMillis
+            return if (wallClockAge >= 0L) wallClockAge else Long.MAX_VALUE
         }
+
+    val hasFreshGpsFix: Boolean
+        get() = hasLiveGpsFix && locationFixAgeMillis <= 30_000L
 
     companion object {
         // Default initial coordinates: Notre-Dame Cathedral / Central Post Office Saigon
@@ -61,69 +75,217 @@ class LocationAndOrientationTracker(context: Context) : SensorEventListener {
     private val _spatialPose = MutableStateFlow(DeviceSpatialPose())
     val spatialPose: StateFlow<DeviceSpatialPose> = _spatialPose.asStateFlow()
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     private val rotationMatrix = FloatArray(9)
     private val remappedRotationMatrix = FloatArray(9)
     private val orientationAngles = FloatArray(3)
 
     private var isLocationTracking = false
+    private var isLocationRequestPending = false
+    private var shouldTrackLocation = false
+    private var locationRequestGeneration = 0
+    private var locationRetryAttempt = 0
+    private var locationRetryRunnable: Runnable? = null
+    private var currentLocationToken: CancellationTokenSource? = null
     private var isSensorTracking = false
+
+    private val locationRecoveryRunnable = object : Runnable {
+        override fun run() {
+            if (!shouldTrackLocation) return
+            if (!_spatialPose.value.hasFreshGpsFix) {
+                requestCurrentLocation()
+            }
+            mainHandler.postDelayed(this, LOCATION_RECOVERY_INTERVAL_MILLIS)
+        }
+    }
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            val loc: Location = result.lastLocation ?: return
-            val previous = _spatialPose.value
-            val displacementMeters = if (previous.hasLiveGpsFix) {
-                calculateDistanceMeters(previous.latitude, previous.longitude, loc.latitude, loc.longitude)
-            } else {
-                0.0
-            }
-            val gpsCourse = when {
-                loc.hasBearing() && loc.hasSpeed() && loc.speed >= 0.8f -> loc.bearing
-                displacementMeters >= 3.0 -> calculateBearingDegrees(
-                    previous.latitude,
-                    previous.longitude,
-                    loc.latitude,
-                    loc.longitude
-                )
-                else -> null
-            }
-            _spatialPose.value = previous.copy(
-                latitude = loc.latitude,
-                longitude = loc.longitude,
-                altitudeMeters = if (loc.hasAltitude()) loc.altitude else 5.0,
-                accuracyMeters = if (loc.hasAccuracy()) loc.accuracy else 10.0f,
-                hasLiveGpsFix = true,
-                locationFixTimeMillis = loc.time,
-                isSimulatedLocation = false,
-                speedMetersPerSecond = if (loc.hasSpeed()) loc.speed else 0f,
-                courseDegrees = gpsCourse?.let {
-                    smoothAngleDegrees(previous.courseDegrees, it, alpha = 0.35f)
-                } ?: previous.courseDegrees
-            )
+            val loc: Location = result.locations.maxByOrNull { it.elapsedRealtimeNanos }
+                ?: result.lastLocation
+                ?: return
+            publishLocation(loc)
+            locationRetryAttempt = 0
         }
+
     }
 
     @SuppressLint("MissingPermission")
     fun startLocationUpdates() {
-        if (isLocationTracking) return
+        shouldTrackLocation = true
+        if (!hasLocationPermission()) return
+
+        if (!isLocationTracking && !isLocationRequestPending) {
+            requestLocationUpdates()
+        }
+        mainHandler.removeCallbacks(locationRecoveryRunnable)
+        mainHandler.postDelayed(locationRecoveryRunnable, LOCATION_RECOVERY_INTERVAL_MILLIS)
+        if (!_spatialPose.value.hasFreshGpsFix) {
+            requestCurrentLocation()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestLocationUpdates() {
+        if (!shouldTrackLocation || isLocationTracking || isLocationRequestPending) return
+        if (!hasLocationPermission()) return
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L)
+            .setMinUpdateIntervalMillis(1_000L)
+            // A distance threshold can suppress updates while the user is stationary,
+            // causing the live fix to age out even though location is still enabled.
+            .setMinUpdateDistanceMeters(0f)
+            .setWaitForAccurateLocation(true)
+            .build()
+        val generation = ++locationRequestGeneration
+        isLocationRequestPending = true
+
         try {
-            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
-                .setMinUpdateIntervalMillis(1500L)
-                .setMinUpdateDistanceMeters(1.5f)
-                .build()
             fusedLocationClient.requestLocationUpdates(
                 request,
                 locationCallback,
                 Looper.getMainLooper()
-            )
-            isLocationTracking = true
+            ).addOnSuccessListener {
+                if (generation != locationRequestGeneration || !shouldTrackLocation) {
+                    if (!shouldTrackLocation) fusedLocationClient.removeLocationUpdates(locationCallback)
+                    return@addOnSuccessListener
+                }
+                isLocationRequestPending = false
+                isLocationTracking = true
+                locationRetryAttempt = 0
+            }.addOnFailureListener {
+                if (generation != locationRequestGeneration) return@addOnFailureListener
+                isLocationRequestPending = false
+                isLocationTracking = false
+                scheduleLocationRetry()
+            }.addOnCanceledListener {
+                if (generation != locationRequestGeneration) return@addOnCanceledListener
+                isLocationRequestPending = false
+                isLocationTracking = false
+                scheduleLocationRetry()
+            }
         } catch (_: SecurityException) {
+            isLocationRequestPending = false
             isLocationTracking = false
         }
     }
 
+    private fun scheduleLocationRetry() {
+        if (!shouldTrackLocation) return
+        locationRetryRunnable?.let(mainHandler::removeCallbacks)
+        val delayMillis = (1_000L shl locationRetryAttempt.coerceAtMost(5)).coerceAtMost(30_000L)
+        locationRetryAttempt = (locationRetryAttempt + 1).coerceAtMost(5)
+        val retry = Runnable {
+            locationRetryRunnable = null
+            requestLocationUpdates()
+        }
+        locationRetryRunnable = retry
+        mainHandler.postDelayed(retry, delayMillis)
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        return appContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            appContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
+
+    @SuppressLint("MissingPermission")
+    fun requestCurrentLocation(onResult: (DeviceSpatialPose?) -> Unit = {}) {
+        if (!hasLocationPermission()) {
+            onResult(null)
+            return
+        }
+
+        currentLocationToken?.cancel()
+        val tokenSource = CancellationTokenSource()
+        currentLocationToken = tokenSource
+        val request = CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+            .setDurationMillis(CURRENT_LOCATION_TIMEOUT_MILLIS)
+            .setMaxUpdateAgeMillis(0L)
+            .build()
+
+        try {
+            fusedLocationClient.getCurrentLocation(request, tokenSource.token)
+                .addOnSuccessListener { location ->
+                    if (currentLocationToken !== tokenSource) return@addOnSuccessListener
+                    currentLocationToken = null
+                    val pose = location?.let(::publishLocation)
+                    onResult(pose)
+                }
+                .addOnFailureListener {
+                    if (currentLocationToken !== tokenSource) return@addOnFailureListener
+                    currentLocationToken = null
+                    onResult(null)
+                }
+                .addOnCanceledListener {
+                    if (currentLocationToken !== tokenSource) return@addOnCanceledListener
+                    currentLocationToken = null
+                    onResult(null)
+                }
+        } catch (_: SecurityException) {
+            if (currentLocationToken === tokenSource) currentLocationToken = null
+            onResult(null)
+        }
+    }
+
+    private fun publishLocation(loc: Location): DeviceSpatialPose {
+        val previous = _spatialPose.value
+        val fixElapsedRealtimeNanos = if (loc.elapsedRealtimeNanos > 0L) {
+            loc.elapsedRealtimeNanos
+        } else {
+            val wallClockAgeMillis = (System.currentTimeMillis() - loc.time).coerceAtLeast(0L)
+            (SystemClock.elapsedRealtimeNanos() - wallClockAgeMillis * 1_000_000L).coerceAtLeast(0L)
+        }
+        if (previous.locationFixElapsedRealtimeNanos > fixElapsedRealtimeNanos &&
+            previous.hasLiveGpsFix &&
+            !previous.isSimulatedLocation
+        ) {
+            return previous
+        }
+
+        val displacementMeters = if (previous.hasFreshGpsFix) {
+            calculateDistanceMeters(previous.latitude, previous.longitude, loc.latitude, loc.longitude)
+        } else {
+            0.0
+        }
+
+        val gpsCourse = when {
+            loc.hasBearing() && loc.hasSpeed() && loc.speed >= 0.8f -> loc.bearing
+            displacementMeters >= 3.0 -> calculateBearingDegrees(
+                previous.latitude,
+                previous.longitude,
+                loc.latitude,
+                loc.longitude
+            )
+            else -> null
+        }
+        return previous.copy(
+            latitude = loc.latitude,
+            longitude = loc.longitude,
+            altitudeMeters = if (loc.hasAltitude()) loc.altitude else 5.0,
+            accuracyMeters = if (loc.hasAccuracy()) loc.accuracy else 10.0f,
+            hasLiveGpsFix = true,
+            locationFixTimeMillis = loc.time.takeIf { it > 0L } ?: System.currentTimeMillis(),
+            locationFixElapsedRealtimeNanos = fixElapsedRealtimeNanos,
+            isSimulatedLocation = false,
+            speedMetersPerSecond = if (loc.hasSpeed()) loc.speed else 0f,
+            courseDegrees = gpsCourse?.let {
+                smoothAngleDegrees(previous.courseDegrees, it, alpha = 0.35f)
+            } ?: previous.courseDegrees
+        ).also { _spatialPose.value = it }
+    }
+
     fun stopLocationUpdates() {
-        if (!isLocationTracking) return
+        shouldTrackLocation = false
+        locationRequestGeneration++
+        isLocationRequestPending = false
+        locationRetryAttempt = 0
+        locationRetryRunnable?.let(mainHandler::removeCallbacks)
+        locationRetryRunnable = null
+        mainHandler.removeCallbacks(locationRecoveryRunnable)
+        currentLocationToken?.cancel()
+        currentLocationToken = null
         fusedLocationClient.removeLocationUpdates(locationCallback)
         isLocationTracking = false
     }
@@ -155,6 +317,7 @@ class LocationAndOrientationTracker(context: Context) : SensorEventListener {
             longitude = longitude,
             hasLiveGpsFix = true,
             locationFixTimeMillis = System.currentTimeMillis(),
+            locationFixElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos(),
             isSimulatedLocation = true,
             azimuthDegrees = azimuthDegrees ?: _spatialPose.value.azimuthDegrees
         )
@@ -193,6 +356,9 @@ class LocationAndOrientationTracker(context: Context) : SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     companion object {
+        private const val LOCATION_RECOVERY_INTERVAL_MILLIS = 20_000L
+        private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 15_000L
+
         /**
          * Circular interpolation for compass angles across the 0 / 360 degree boundary.
          */

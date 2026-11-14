@@ -84,7 +84,10 @@ fun OpenFreeMapComposeView(
 
     var mapLibreInstance by remember { mutableStateOf<MapLibreMap?>(null) }
     var isStyleReady by remember { mutableStateOf(false) }
-    var hasCenteredInitially by remember { mutableStateOf(false) }
+    var hasCenteredOnLiveGps by remember { mutableStateOf(false) }
+    var hasSetInitialCamera by remember { mutableStateOf(false) }
+    var hasUserMovedMap by remember { mutableStateOf(false) }
+    var isFollowingNavigation by remember { mutableStateOf(false) }
 
     val currentPois by rememberUpdatedState(pois)
     val currentNavigationRoute by rememberUpdatedState(navigationRoute)
@@ -95,6 +98,10 @@ fun OpenFreeMapComposeView(
     val currentOnPoiClick by rememberUpdatedState(onPoiMarkerClick)
     val density = context.resources.displayMetrics.density
     var fittedNavigationSession by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(navigationSessionKey) {
+        isFollowingNavigation = navigationSessionKey != null
+    }
 
     // Bind MapView lifecycle to Compose LifecycleOwner
     DisposableEffect(lifecycleOwner, mapView) {
@@ -116,20 +123,24 @@ fun OpenFreeMapComposeView(
     }
 
     // Recenter camera when requested by user button
-    LaunchedEffect(recenterTrigger, mapLibreInstance) {
-        if (recenterTrigger > 0) {
-            mapLibreInstance?.animateCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(LatLng(spatialPose.latitude, spatialPose.longitude))
-                        .zoom(14.8)
-                        .bearing(spatialPose.courseDegrees.toDouble())
-                        .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
-                        .build()
-                ),
-                900
-            )
+    LaunchedEffect(recenterTrigger, mapLibreInstance, isStyleReady) {
+        if (recenterTrigger <= 0 || !isStyleReady || !spatialPose.hasFreshGpsFix || spatialPose.isSimulatedLocation) {
+            return@LaunchedEffect
         }
+        val map = mapLibreInstance ?: return@LaunchedEffect
+        hasUserMovedMap = false
+        isFollowingNavigation = navigationSessionKey != null
+        map.animateCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(LatLng(spatialPose.latitude, spatialPose.longitude))
+                    .zoom(if (isNavigationActive) 17.0 else 14.8)
+                    .bearing(spatialPose.courseDegrees.toDouble())
+                    .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
+                    .build()
+            ),
+            900
+        )
     }
 
     // Focus the requested POI even when it was selected from a list outside the map.
@@ -182,11 +193,14 @@ fun OpenFreeMapComposeView(
         spatialPose.courseDegrees,
         spatialPose.hasFreshGpsFix,
         isNavigationActive,
+        isFollowingNavigation,
         mapLibreInstance,
         isStyleReady
     ) {
         val map = mapLibreInstance ?: return@LaunchedEffect
-        if (!isStyleReady || !isNavigationActive || !spatialPose.hasFreshGpsFix) return@LaunchedEffect
+        if (!isStyleReady || !isNavigationActive || !isFollowingNavigation || !spatialPose.hasFreshGpsFix) {
+            return@LaunchedEffect
+        }
 
         map.animateCamera(
             CameraUpdateFactory.newCameraPosition(
@@ -198,6 +212,38 @@ fun OpenFreeMapComposeView(
                     .build()
             ),
             650
+        )
+    }
+
+    // Center on the first real GPS fix, even if the map style finished loading first.
+    LaunchedEffect(
+        spatialPose.locationFixElapsedRealtimeNanos,
+        spatialPose.hasFreshGpsFix,
+        spatialPose.isSimulatedLocation,
+        hasUserMovedMap,
+        mapLibreInstance,
+        isStyleReady
+    ) {
+        val map = mapLibreInstance ?: return@LaunchedEffect
+        if (!isStyleReady || hasCenteredOnLiveGps || hasUserMovedMap) return@LaunchedEffect
+
+        if (spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation) {
+            hasCenteredOnLiveGps = true
+        } else if (hasSetInitialCamera) {
+            return@LaunchedEffect
+        } else {
+            hasSetInitialCamera = true
+        }
+
+        map.animateCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(LatLng(spatialPose.latitude, spatialPose.longitude))
+                    .zoom(14.5)
+                    .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
+                    .build()
+            ),
+            750
         )
     }
 
@@ -230,23 +276,6 @@ fun OpenFreeMapComposeView(
             isNavigationActive = isNavigationActive
         )
 
-        if (!hasCenteredInitially) {
-            hasCenteredInitially = true
-            val focusedPoi = pois.firstOrNull { it.id == focusedPoiId }
-            map.animateCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(
-                            focusedPoi?.let { LatLng(it.latitude, it.longitude) }
-                                ?: LatLng(spatialPose.latitude, spatialPose.longitude)
-                        )
-                        .zoom(if (focusedPoi != null) 15.5 else 14.5)
-                        .tilt(MAP_3D_DEFAULT_TILT_DEGREES)
-                        .build()
-                ),
-                750
-            )
-        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -276,9 +305,18 @@ fun OpenFreeMapComposeView(
                     getMapAsync { map ->
                         mapLibreInstance = map
                         map.uiSettings.isCompassEnabled = true
+                        map.uiSettings.isScrollGesturesEnabled = true
+                        map.uiSettings.isZoomGesturesEnabled = true
                         map.uiSettings.isRotateGesturesEnabled = true
                         map.uiSettings.isTiltGesturesEnabled = true
                         map.uiSettings.isAttributionEnabled = true
+
+                        map.addOnCameraMoveStartedListener { reason ->
+                            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                                hasUserMovedMap = true
+                                isFollowingNavigation = false
+                            }
+                        }
 
                         loadDauVienDuBrandStyle(
                             context = context,

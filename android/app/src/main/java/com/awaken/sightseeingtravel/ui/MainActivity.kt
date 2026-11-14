@@ -206,6 +206,25 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
             currentDestination = destination
         }
     }
+    val recenterMapToGps: () -> Unit = {
+        focusedPoiId = null
+        viewModel.clearSelectedPoi()
+
+        val recentPose = spatialPose.takeIf {
+            it.hasFreshGpsFix && !it.isSimulatedLocation && it.locationFixAgeMillis <= 10_000L
+        }
+        val centerOnPose: (DeviceSpatialPose) -> Unit = { pose ->
+            recenterTrigger++
+            viewModel.loadNearbyPois(pose.latitude, pose.longitude)
+        }
+        if (recentPose != null) {
+            centerOnPose(recentPose)
+        } else {
+            viewModel.requestCurrentLocation { pose ->
+                if (pose != null) centerOnPose(pose)
+            }
+        }
+    }
 
     val shouldHandleBack = uiState.currentUser != null && (
         currentDestination != AppDestination.MAIN_TABS ||
@@ -489,7 +508,7 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
                                 recenterTrigger = recenterTrigger,
                                 focusedPoiId = focusedPoiId,
                                 mapFocusTrigger = mapFocusTrigger,
-                                onIncrementRecenter = { recenterTrigger++ },
+                                onRecenterToGps = recenterMapToGps,
                                 onSelectPoi = selectPoiForMap,
                                 onDirectionsToPin = { poiId, title, latitude, longitude ->
                                     viewModel.calculateRouteToPin(poiId, title, latitude, longitude)
@@ -1542,7 +1561,7 @@ private fun ExploreMapTabContent(
     recenterTrigger: Int,
     focusedPoiId: String?,
     mapFocusTrigger: Int,
-    onIncrementRecenter: () -> Unit,
+    onRecenterToGps: () -> Unit,
     onSelectPoi: (PoiPinSummaryDto) -> Unit,
     onDirectionsToPin: (poiId: String, title: String, latitude: Double, longitude: Double) -> Unit,
     onSelectNavigationMode: (NavigationTravelMode) -> Unit,
@@ -1551,27 +1570,9 @@ private fun ExploreMapTabContent(
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
     var searchQuery by remember { mutableStateOf("") }
-    var hasAutoSelectedNearbyPoi by remember { mutableStateOf(false) }
     val visiblePois = uiState.nearbyPois.filter { poi ->
         searchQuery.isBlank() || poi.title.contains(searchQuery, ignoreCase = true) ||
             PoiCategoryLabels.label(poi.category, uiState.selectedLanguage).contains(searchQuery, ignoreCase = true)
-    }
-
-    LaunchedEffect(uiState.nearbyPois.firstOrNull()?.id) {
-        if (!hasAutoSelectedNearbyPoi && uiState.selectedPoiDetail == null) {
-            val firstNearbyPoi = uiState.nearbyPois.minByOrNull { poi ->
-                LocationAndOrientationTracker.calculateDistanceMeters(
-                    spatialPose.latitude,
-                    spatialPose.longitude,
-                    poi.latitude,
-                    poi.longitude
-                )
-            }
-            if (firstNearbyPoi != null) {
-                hasAutoSelectedNearbyPoi = true
-                onSelectPoi(firstNearbyPoi)
-            }
-        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1699,8 +1700,7 @@ private fun ExploreMapTabContent(
         // 3. Recenter GPS FAB
         FloatingActionButton(
             onClick = {
-                onIncrementRecenter()
-                viewModel.loadNearbyPois(spatialPose.latitude, spatialPose.longitude)
+                onRecenterToGps()
             },
             containerColor = Color.White,
             contentColor = BrandColors.Primary,
@@ -1715,7 +1715,14 @@ private fun ExploreMapTabContent(
                     }
                 )
         ) {
-            Icon(Icons.Default.MyLocation, contentDescription = "Recenter GPS")
+            Icon(
+                Icons.Default.MyLocation,
+                contentDescription = if (uiState.navigationTarget != null) {
+                    if (isEn) "Re-center and follow route" else "Về vị trí GPS và theo dõi tuyến"
+                } else {
+                    if (isEn) "Re-center on my location" else "Về vị trí GPS của tôi"
+                }
+            )
         }
 
         uiState.navigationTarget?.let { target ->
@@ -1833,8 +1840,14 @@ private fun ExploreMapTabContent(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        TextButton(onClick = onRecenterToGps) {
+                            Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (isEn) "Re-center" else "Về GPS")
+                        }
                         TextButton(
                             onClick = viewModel::recalculateNavigationRoute,
                             enabled = !uiState.isCalculatingRoute

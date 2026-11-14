@@ -135,7 +135,33 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun stopSensors() {
+        locationAndOrientationTracker.stopLocationUpdates()
         locationAndOrientationTracker.stopOrientationUpdates()
+    }
+
+    fun requestCurrentLocation(onResult: (DeviceSpatialPose?) -> Unit = {}) {
+        locationAndOrientationTracker.requestCurrentLocation { requestedPose ->
+            val usablePose = requestedPose?.takeIf {
+                it.hasFreshGpsFix && !it.isSimulatedLocation
+            } ?: spatialPose.value.takeIf {
+                it.hasFreshGpsFix && !it.isSimulatedLocation
+            }
+
+            _uiState.update {
+                it.copy(
+                    errorMessage = if (usablePose == null) {
+                        if (it.selectedLanguage == "en") {
+                            "Could not get a current GPS fix. Check location permission and device location, then try again."
+                        } else {
+                            "Chưa lấy được vị trí GPS hiện tại. Hãy kiểm tra quyền và dịch vụ Vị trí rồi thử lại."
+                        }
+                    } else {
+                        null
+                    }
+                )
+            }
+            onResult(usablePose)
+        }
     }
 
     fun clearBannerMessages() {
