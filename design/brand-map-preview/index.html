@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dấu Viễn Du · Map Style Preview</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.18.0/dist/maplibre-gl.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --brand-deep: #3f1d18;
+      --brand-primary: #622821;
+      --brand-terra: #9a4333;
+      --brand-cream: #f6dcad;
+      --brand-paper: #fff9f0;
+      --brand-surface: #fffcf7;
+      --brand-muted: #75655c;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: var(--brand-paper); font-family: Inter, "Noto Sans", system-ui, sans-serif; }
+    #map { position: absolute; inset: 0; background: var(--brand-paper); }
+    .top-card {
+      position: absolute; z-index: 2; top: 18px; left: 18px; max-width: min(410px, calc(100vw - 36px));
+      display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+      border: 1px solid rgba(98, 40, 33, .1); border-radius: 20px;
+      background: rgba(255, 252, 247, .94); box-shadow: 0 8px 30px rgba(63, 29, 24, .14);
+      backdrop-filter: blur(12px); color: var(--brand-deep);
+    }
+    .stamp {
+      display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 15px;
+      background: var(--brand-cream); color: var(--brand-primary); font-size: 22px;
+    }
+    .top-card strong { display: block; font-size: 14px; letter-spacing: .01em; }
+    .top-card span { display: block; margin-top: 3px; color: var(--brand-muted); font-size: 11px; }
+    .palette {
+      position: absolute; z-index: 2; bottom: 18px; left: 18px; max-width: min(550px, calc(100vw - 36px));
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 14px;
+      border: 1px solid rgba(98, 40, 33, .1); border-radius: 18px;
+      background: rgba(255, 252, 247, .94); box-shadow: 0 8px 30px rgba(63, 29, 24, .12);
+      backdrop-filter: blur(12px); color: var(--brand-deep); font-size: 11px;
+    }
+    .swatch { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .dot { width: 12px; height: 12px; border: 1px solid rgba(63, 29, 24, .12); border-radius: 50%; }
+    .poi-marker {
+      display: grid; place-items: center; width: 38px; height: 38px; border: 3px solid var(--brand-paper); border-radius: 50%;
+      box-shadow: 0 3px 10px rgba(63, 29, 24, .32); color: #fff9f0; font-size: 17px;
+      transform: translateY(-4px);
+    }
+    .maplibregl-ctrl-group { overflow: hidden; border: 1px solid rgba(98, 40, 33, .12) !important; border-radius: 14px !important; box-shadow: 0 4px 16px rgba(63,29,24,.12) !important; }
+    .maplibregl-ctrl button { background-color: var(--brand-surface) !important; }
+    .maplibregl-ctrl-attrib { border-radius: 9px 0 0 0; color: var(--brand-muted) !important; background: rgba(255,252,247,.9) !important; }
+    .maplibregl-ctrl-attrib a { color: var(--brand-primary) !important; }
+    @media (max-width: 520px) {
+      .top-card { top: 12px; left: 12px; }
+      .palette { bottom: 12px; left: 12px; right: 12px; gap: 7px 10px; }
+      .maplibregl-ctrl-bottom-right { bottom: 66px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Bản xem thử style bản đồ Dấu Viễn Du"></div>
+  <div class="top-card">
+    <div class="stamp">✦</div>
+    <div>
+      <strong>Dấu Viễn Du · Mộc sắc kem</strong>
+      <span>MapLibre · OpenFreeMap · thử nghiệm bảng màu thương hiệu</span>
+    </div>
+  </div>
+  <div class="palette" aria-label="Bảng màu bản đồ">
+    <span class="swatch"><i class="dot" style="background:#fff9f0"></i>Giấy kem</span>
+    <span class="swatch"><i class="dot" style="background:#e2b489"></i>Đường đất nung</span>
+    <span class="swatch"><i class="dot" style="background:#bbdddc"></i>Mặt nước</span>
+    <span class="swatch"><i class="dot" style="background:#dce8d8"></i>Công viên</span>
+    <span class="swatch"><i class="dot" style="background:#e4d5c2"></i>Công trình 3D</span>
+  </div>
+  <script type="module">
+    import { Map, Marker, NavigationControl } from "https://unpkg.com/maplibre-gl@6.18.0/dist/maplibre-gl.mjs";
+
+    const map = new Map({
+      container: "map",
+      style: "/android/app/src/main/assets/map_style_dauviendu.json",
+      center: [106.698998, 10.779798],
+      zoom: 15.1,
+      pitch: 55,
+      bearing: -12,
+      antialias: true,
+      attributionControl: true
+    });
+    map.addControl(new NavigationControl({ visualizePitch: true }), "bottom-right");
+
+    const markers = [
+      { at: [106.6984, 10.7807], icon: "🍽️", color: "#9a4333", title: "Ăn uống" },
+      { at: [106.7012, 10.7795], icon: "📸", color: "#28758a", title: "Tham quan" },
+      { at: [106.6968, 10.7789], icon: "🏛️", color: "#68518b", title: "Di sản văn hoá" },
+      { at: [106.7004, 10.7778], icon: "🗿", color: "#526b45", title: "Di tích lịch sử" }
+    ];
+    markers.forEach(({ at, icon, color, title }) => {
+      const element = document.createElement("div");
+      element.className = "poi-marker";
+      element.style.background = color;
+      element.textContent = icon;
+      element.title = title;
+      new Marker({ element, anchor: "bottom" }).setLngLat(at).addTo(map);
+    });
+  </script>
+</body>
+</html>

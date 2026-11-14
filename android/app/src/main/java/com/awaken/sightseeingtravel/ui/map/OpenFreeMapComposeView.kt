@@ -41,7 +41,7 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
-/** OpenFreeMap Liberty includes vector building data with 3D building extrusion. */
+/** Dấu Viễn Du's branded OpenFreeMap vector style retains 3D building extrusion. */
 const val OPENFREEMAP_3D_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
 private const val MAP_3D_DEFAULT_TILT_DEGREES = 55.0
@@ -280,7 +280,7 @@ fun OpenFreeMapComposeView(
                         map.uiSettings.isTiltGesturesEnabled = true
                         map.uiSettings.isAttributionEnabled = true
 
-                        loadOpenFreeMapLibertyStyle(
+                        loadDauVienDuBrandStyle(
                             context = context,
                             map = map,
                             onStyleReady = { style ->
@@ -368,14 +368,24 @@ private fun poiMarkerIconKey(category: String, markerState: PoiMarkerState): Str
     "icon-poi-${PoiCategoryLabels.normalize(category)}-${markerState.name.lowercase()}"
 
 /**
- * Loads OpenFreeMap Liberty, whose style includes the `building-3d` extrusion layer.
+ * Loads the local Dấu Viễn Du map style. It uses OpenFreeMap vector tiles and fonts,
+ * while keeping the branded palette under the app's control instead of a hosted style URL.
  */
-private fun loadOpenFreeMapLibertyStyle(
+private fun loadDauVienDuBrandStyle(
     context: Context,
     map: MapLibreMap,
     onStyleReady: (Style) -> Unit
 ) {
-    map.setStyle(Style.Builder().fromUri(OPENFREEMAP_3D_STYLE_URL)) { style ->
+    val styleBuilder = runCatching {
+        val styleJson = context.assets.open("map_style_dauviendu.json")
+            .bufferedReader()
+            .use { it.readText() }
+        Style.Builder().fromJson(styleJson)
+    }.getOrElse {
+        Style.Builder().fromUri(OPENFREEMAP_3D_STYLE_URL)
+    }
+
+    map.setStyle(styleBuilder) { style ->
         setupCustomPinBitmapsAndLayers(context, style)
         onStyleReady(style)
     }
