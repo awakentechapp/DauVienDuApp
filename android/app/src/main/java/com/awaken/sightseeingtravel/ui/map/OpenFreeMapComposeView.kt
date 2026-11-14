@@ -348,10 +348,6 @@ private const val SOURCE_POI_PINS = "source-poi-pins"
 private const val LAYER_POI_PINS = "layer-poi-pins"
 private const val SOURCE_POI_SELECTED = "source-poi-selected"
 private const val LAYER_POI_SELECTED = "layer-poi-selected"
-private const val ICON_POI_LOCKED = "icon-poi-locked"
-private const val ICON_POI_FOOD = "icon-poi-food"
-private const val ICON_POI_UNLOCKED = "icon-poi-unlocked"
-private const val ICON_POI_SELECTED = "icon-poi-selected"
 
 private const val SOURCE_NAVIGATION_ROUTE = "source-navigation-route"
 private const val LAYER_NAVIGATION_ROUTE = "layer-navigation-route"
@@ -361,6 +357,15 @@ private const val PROP_POI_TITLE = "poi_title"
 private const val PROP_POI_ICON = "poi_icon"
 private const val PROP_GPS_ICON = "gps_icon"
 private const val PROP_GPS_COURSE = "gps_course"
+
+private enum class PoiMarkerState {
+    LOCKED,
+    UNLOCKED,
+    SELECTED
+}
+
+private fun poiMarkerIconKey(category: String, markerState: PoiMarkerState): String =
+    "icon-poi-${PoiCategoryLabels.normalize(category)}-${markerState.name.lowercase()}"
 
 /**
  * Loads OpenFreeMap Liberty, whose style includes the `building-3d` extrusion layer.
@@ -411,10 +416,19 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     style.addImage(ICON_NAVIGATION_WALKING, createNavigationMarkerBitmap(density, NavigationTravelMode.WALKING))
     style.addImage(ICON_NAVIGATION_CAR, createNavigationMarkerBitmap(density, NavigationTravelMode.CAR))
     style.addImage(ICON_NAVIGATION_MOTORCYCLE, createNavigationMarkerBitmap(density, NavigationTravelMode.MOTORCYCLE))
-    style.addImage(ICON_POI_LOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#622821"), ringColor = Color.parseColor("#F6DCAD")))
-    style.addImage(ICON_POI_FOOD, createPoiPinBitmap(density, fillColor = Color.parseColor("#9A4333"), ringColor = Color.parseColor("#FFF9F0")))
-    style.addImage(ICON_POI_UNLOCKED, createPoiPinBitmap(density, fillColor = Color.parseColor("#9A4333"), ringColor = Color.parseColor("#F6DCAD")))
-    style.addImage(ICON_POI_SELECTED, createPoiPinBitmap(density, fillColor = Color.parseColor("#3F1D18"), ringColor = Color.parseColor("#F6DCAD")))
+    PoiCategoryLabels.values.forEach { category ->
+        PoiMarkerState.entries.forEach { markerState ->
+            val (fillColor, ringColor) = when (markerState) {
+                PoiMarkerState.LOCKED -> Color.parseColor("#622821") to Color.parseColor("#F6DCAD")
+                PoiMarkerState.UNLOCKED -> Color.parseColor("#9A4333") to Color.parseColor("#F6DCAD")
+                PoiMarkerState.SELECTED -> Color.parseColor("#3F1D18") to Color.parseColor("#F6DCAD")
+            }
+            style.addImage(
+                poiMarkerIconKey(category, markerState),
+                createPoiPinBitmap(density, fillColor, ringColor, category)
+            )
+        }
+    }
 
     if (style.getSource(SOURCE_NAVIGATION_ROUTE) == null) {
         style.addSource(GeoJsonSource(SOURCE_NAVIGATION_ROUTE))
@@ -456,7 +470,7 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     if (style.getLayer(LAYER_POI_SELECTED) == null) {
         style.addLayer(
             SymbolLayer(LAYER_POI_SELECTED, SOURCE_POI_SELECTED).withProperties(
-                iconImage(ICON_POI_SELECTED),
+                iconImage("{$PROP_POI_ICON}"),
                 iconSize(1.28f),
                 iconAllowOverlap(true),
                 iconIgnorePlacement(true),
@@ -540,12 +554,11 @@ private fun updateGeoJsonLayers(
         val hasFreshGps = spatialPose.hasFreshGpsFix &&
             !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f
         val isUnlocked = hasFreshGps && poi.canUnlockAr(liveDistance)
-        val isFood = PoiCategoryLabels.isFood(poi.category)
-        val iconKey = when {
-            isUnlocked -> ICON_POI_UNLOCKED
-            isFood -> ICON_POI_FOOD
-            else -> ICON_POI_LOCKED
+        val markerState = when {
+            isUnlocked -> PoiMarkerState.UNLOCKED
+            else -> PoiMarkerState.LOCKED
         }
+        val iconKey = poiMarkerIconKey(poi.category, markerState)
         val props = JsonObject().apply {
             addProperty(PROP_POI_ID, poi.id)
             addProperty(PROP_POI_TITLE, poi.title)
@@ -560,6 +573,7 @@ private fun updateGeoJsonLayers(
         val selectedProperties = JsonObject().apply {
             addProperty(PROP_POI_ID, selectedPoi.id)
             addProperty(PROP_POI_TITLE, selectedPoi.title)
+            addProperty(PROP_POI_ICON, poiMarkerIconKey(selectedPoi.category, PoiMarkerState.SELECTED))
         }
         selectedSource?.setGeoJson(
             Feature.fromGeometry(
@@ -708,7 +722,12 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
     return bitmap
 }
 
-private fun createPoiPinBitmap(density: Float, fillColor: Int, ringColor: Int): Bitmap {
+private fun createPoiPinBitmap(
+    density: Float,
+    fillColor: Int,
+    ringColor: Int,
+    category: String
+): Bitmap {
     val sizePx = (38 * density).toInt().coerceAtLeast(38)
     val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
@@ -726,11 +745,112 @@ private fun createPoiPinBitmap(density: Float, fillColor: Int, ringColor: Int): 
     }
     canvas.drawCircle(center, center, center * 0.68f, innerPaint)
 
-    val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+    val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FFF9F0")
+        style = Paint.Style.STROKE
+        strokeWidth = 1.65f * density
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    val glyphFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FFF9F0")
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(center, center, center * 0.26f, corePaint)
+    val unit = density
+
+    when (PoiCategoryLabels.normalize(category)) {
+        PoiCategoryLabels.FOOD_AND_DRINK -> drawFoodGlyph(canvas, center, unit, glyphPaint)
+        PoiCategoryLabels.TOURIST_ATTRACTION -> drawAttractionGlyph(canvas, center, unit, glyphPaint)
+        PoiCategoryLabels.CULTURAL_HERITAGE -> drawCulturalHeritageGlyph(canvas, center, unit, glyphPaint)
+        else -> drawHistoricalSiteGlyph(canvas, center, unit, glyphPaint, glyphFillPaint)
+    }
 
     return bitmap
+}
+
+private fun drawFoodGlyph(canvas: Canvas, center: Float, unit: Float, paint: Paint) {
+    // Fork on the left and knife on the right.
+    val left = center - 3.2f * unit
+    canvas.drawLine(left, center - 5.5f * unit, left, center + 5.5f * unit, paint)
+    canvas.drawLine(left - 2f * unit, center - 5.5f * unit, left - 2f * unit, center - 2f * unit, paint)
+    canvas.drawLine(left, center - 5.5f * unit, left, center - 2f * unit, paint)
+    canvas.drawLine(left + 2f * unit, center - 5.5f * unit, left + 2f * unit, center - 2f * unit, paint)
+    canvas.drawLine(left - 2f * unit, center - 2f * unit, left + 2f * unit, center - 2f * unit, paint)
+
+    val right = center + 3.2f * unit
+    val knife = Path().apply {
+        moveTo(right, center - 5.5f * unit)
+        lineTo(right + 2.4f * unit, center - 1f * unit)
+        lineTo(right, center + 0.8f * unit)
+        close()
+        moveTo(right, center + 0.8f * unit)
+        lineTo(right, center + 5.5f * unit)
+    }
+    canvas.drawPath(knife, paint)
+}
+
+private fun drawAttractionGlyph(canvas: Canvas, center: Float, unit: Float, paint: Paint) {
+    // A camera symbol represents places visitors explore and photograph.
+    canvas.drawRoundRect(
+        RectF(center - 6f * unit, center - 3.5f * unit, center + 6f * unit, center + 4.5f * unit),
+        1.2f * unit,
+        1.2f * unit,
+        paint
+    )
+    val top = Path().apply {
+        moveTo(center - 3.5f * unit, center - 3.5f * unit)
+        lineTo(center - 2f * unit, center - 5.2f * unit)
+        lineTo(center + 2f * unit, center - 5.2f * unit)
+        lineTo(center + 3.5f * unit, center - 3.5f * unit)
+    }
+    canvas.drawPath(top, paint)
+    canvas.drawCircle(center, center + 0.5f * unit, 2.25f * unit, paint)
+}
+
+private fun drawCulturalHeritageGlyph(canvas: Canvas, center: Float, unit: Float, paint: Paint) {
+    // A traditional roof and columns distinguish cultural heritage from a monument.
+    val roof = Path().apply {
+        moveTo(center - 7f * unit, center - 2f * unit)
+        lineTo(center - 5.2f * unit, center - 4f * unit)
+        lineTo(center - 3.5f * unit, center - 4f * unit)
+        lineTo(center, center - 6f * unit)
+        lineTo(center + 3.5f * unit, center - 4f * unit)
+        lineTo(center + 5.2f * unit, center - 4f * unit)
+        lineTo(center + 7f * unit, center - 2f * unit)
+        close()
+    }
+    canvas.drawPath(roof, paint)
+    canvas.drawLine(center - 6.5f * unit, center - 0.5f * unit, center + 6.5f * unit, center - 0.5f * unit, paint)
+    listOf(-4f, 0f, 4f).forEach { offset ->
+        canvas.drawLine(
+            center + offset * unit,
+            center - 0.5f * unit,
+            center + offset * unit,
+            center + 4f * unit,
+            paint
+        )
+    }
+    canvas.drawLine(center - 6.5f * unit, center + 4.5f * unit, center + 6.5f * unit, center + 4.5f * unit, paint)
+    canvas.drawLine(center - 7f * unit, center + 6f * unit, center + 7f * unit, center + 6f * unit, paint)
+}
+
+private fun drawHistoricalSiteGlyph(
+    canvas: Canvas,
+    center: Float,
+    unit: Float,
+    strokePaint: Paint,
+    fillPaint: Paint
+) {
+    // An obelisk silhouette identifies historic sites without reusing the heritage temple glyph.
+    val monument = Path().apply {
+        moveTo(center, center - 7f * unit)
+        lineTo(center + 3f * unit, center - 1.5f * unit)
+        lineTo(center + 2.5f * unit, center + 4f * unit)
+        lineTo(center - 2.5f * unit, center + 4f * unit)
+        lineTo(center - 3f * unit, center - 1.5f * unit)
+        close()
+    }
+    canvas.drawPath(monument, fillPaint)
+    canvas.drawLine(center - 4.5f * unit, center + 4.7f * unit, center + 4.5f * unit, center + 4.7f * unit, strokePaint)
+    canvas.drawLine(center - 5.5f * unit, center + 6.2f * unit, center + 5.5f * unit, center + 6.2f * unit, strokePaint)
 }

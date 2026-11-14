@@ -3,6 +3,7 @@ package com.awaken.sightseeingtravel.ui
 import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
@@ -39,6 +41,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.awaken.sightseeingtravel.BuildConfig
 import coil.compose.AsyncImage
 import com.awaken.sightseeingtravel.R
@@ -144,6 +148,28 @@ private fun isFoodCategory(category: String): Boolean {
     return PoiCategoryLabels.isFood(category)
 }
 
+private fun normalizePlacesFilter(value: String): String = when (value.trim().uppercase()) {
+    "ALL" -> "ALL"
+    "FOOD" -> PoiCategoryLabels.FOOD_AND_DRINK
+    "CULTURE" -> PoiCategoryLabels.CULTURAL_HERITAGE
+    "AR_READY" -> "AR_READY"
+    else -> PoiCategoryLabels.normalize(value)
+}
+
+private fun poiCategoryEmoji(category: String): String = when (PoiCategoryLabels.normalize(category)) {
+    PoiCategoryLabels.FOOD_AND_DRINK -> "🍽️"
+    PoiCategoryLabels.TOURIST_ATTRACTION -> "📸"
+    PoiCategoryLabels.CULTURAL_HERITAGE -> "🏛️"
+    else -> "🗿"
+}
+
+private fun poiCategoryAccentColor(category: String): Color = when (PoiCategoryLabels.normalize(category)) {
+    PoiCategoryLabels.FOOD_AND_DRINK -> BrandColors.Terracotta
+    PoiCategoryLabels.TOURIST_ATTRACTION -> Color(0xFF28758A)
+    PoiCategoryLabels.CULTURAL_HERITAGE -> Color(0xFF68518B)
+    else -> Color(0xFF526B45)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
@@ -178,6 +204,33 @@ fun SightseeingTravelRootApp(viewModel: SightseeingAppViewModel) {
         }
         viewModel.openArExperienceForPoi(poiId) {
             currentDestination = destination
+        }
+    }
+
+    val shouldHandleBack = uiState.currentUser != null && (
+        currentDestination != AppDestination.MAIN_TABS ||
+            showAuthModal ||
+            pendingCameraChoicePoiId != null ||
+            (selectedTab == MainBottomTab.EXPLORE &&
+                (uiState.selectedPoiDetail != null || uiState.navigationTarget != null))
+        )
+
+    BackHandler(enabled = shouldHandleBack) {
+        when {
+            showAuthModal -> showAuthModal = false
+            pendingCameraChoicePoiId != null -> pendingCameraChoicePoiId = null
+            currentDestination == AppDestination.AR_SELFIE_CAMERA -> {
+                currentDestination = selfieReturnDestination
+            }
+            currentDestination != AppDestination.MAIN_TABS -> {
+                currentDestination = AppDestination.MAIN_TABS
+            }
+            selectedTab == MainBottomTab.EXPLORE && uiState.navigationTarget != null -> {
+                viewModel.clearNavigation()
+            }
+            selectedTab == MainBottomTab.EXPLORE && uiState.selectedPoiDetail != null -> {
+                viewModel.clearSelectedPoi()
+            }
         }
     }
 
@@ -1090,6 +1143,48 @@ private fun HomeStatCard(
 // ============================================================================
 
 @Composable
+private fun PlacesCategoryChip(
+    selected: Boolean,
+    label: String,
+    icon: String,
+    count: Int,
+    accent: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(icon, fontSize = 14.sp)
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = label,
+                    modifier = Modifier.weight(1f),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(count.toString(), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = BrandColors.Surface,
+            labelColor = BrandColors.MutedText,
+            selectedContainerColor = accent.copy(alpha = 0.14f),
+            selectedLabelColor = accent
+        ),
+        modifier = modifier
+    )
+}
+
+@Composable
 private fun PlacesDirectoryTabScreen(
     uiState: SightseeingUiState,
     spatialPose: DeviceSpatialPose,
@@ -1102,9 +1197,9 @@ private fun PlacesDirectoryTabScreen(
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
     var searchQuery by remember { mutableStateOf("") }
-    var selectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
-
-    val filterKeys = listOf("ALL", "FOOD", "CULTURE", "AR_READY")
+    var selectedCategory by remember(initialCategory) {
+        mutableStateOf(normalizePlacesFilter(initialCategory))
+    }
 
     // Filter all POIs strictly within 50km (50,000 meters) of current location
     val poisWithin50Km = uiState.nearbyPois.map { pin ->
@@ -1117,6 +1212,15 @@ private fun PlacesDirectoryTabScreen(
         pin.copy(distanceMeters = dist)
     }.filter { (it.distanceMeters ?: 0.0) <= SightseeingAppViewModel.SEARCH_RADIUS_METERS }
         .sortedBy { it.distanceMeters ?: Double.MAX_VALUE }
+    val hasUsableGps = spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation && spatialPose.accuracyMeters <= 50f
+    val categoryCounts = PoiCategoryLabels.values.associateWith { category ->
+        poisWithin50Km.count { PoiCategoryLabels.normalize(it.category) == category }
+    }
+    val arReadyCount = if (hasUsableGps) {
+        poisWithin50Km.count { pin -> pin.canUnlockAr(pin.distanceMeters ?: Double.MAX_VALUE) }
+    } else {
+        0
+    }
 
     val filteredPois = poisWithin50Km.filter { pin ->
         val matchesSearch = searchQuery.isBlank() ||
@@ -1127,11 +1231,8 @@ private fun PlacesDirectoryTabScreen(
         val liveDist = pin.distanceMeters ?: 0.0
         val matchesCategory = when (selectedCategory) {
             "ALL" -> true
-            "FOOD" -> isFoodCategory(pin.category)
-            "CULTURE" -> !isFoodCategory(pin.category)
-            "AR_READY" -> spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation &&
-                spatialPose.accuracyMeters <= 50f && pin.canUnlockAr(liveDist)
-            else -> pin.category.equals(selectedCategory, ignoreCase = true)
+            "AR_READY" -> hasUsableGps && pin.canUnlockAr(liveDist)
+            else -> PoiCategoryLabels.normalize(pin.category) == selectedCategory
         }
         matchesSearch && matchesCategory
     }
@@ -1210,23 +1311,63 @@ private fun PlacesDirectoryTabScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(filterKeys) { key ->
-                        val label = when (key) {
-                            "ALL" -> if (isEn) "All (≤ 50km)" else "Tất cả (≤ 50km)"
-                            "FOOD" -> if (isEn) "🍽️ Food & Dining (Ăn uống)" else "🍽️ Ăn uống"
-                            "CULTURE" -> if (isEn) "🏛️ Cultural & Heritage" else "🏛️ Di sản & Văn hóa"
-                            "AR_READY" -> if (isEn) "✨ AR Unlocked" else "✨ Đã mở khóa AR"
-                            else -> key
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PlacesCategoryChip(
+                        selected = selectedCategory == "ALL",
+                        label = if (isEn) "All places" else "Tất cả",
+                        icon = "📍",
+                        count = poisWithin50Km.size,
+                        accent = BrandColors.Primary,
+                        onClick = {
+                            selectedCategory = "ALL"
+                            onCategoryChanged("ALL")
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    PlacesCategoryChip(
+                        selected = selectedCategory == "AR_READY",
+                        label = if (isEn) "AR unlocked" else "Đã mở AR",
+                        icon = "✨",
+                        count = arReadyCount,
+                        accent = BrandColors.Terracotta,
+                        onClick = {
+                            selectedCategory = "AR_READY"
+                            onCategoryChanged("AR_READY")
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text(
+                    text = if (isEn) "Browse by category" else "Danh mục địa điểm",
+                    fontSize = 12.sp,
+                    color = BrandColors.PrimaryDeep,
+                    fontWeight = FontWeight.Bold
+                )
+
+                PoiCategoryLabels.values.chunked(2).forEach { rowCategories ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowCategories.forEach { category ->
+                            PlacesCategoryChip(
+                                selected = selectedCategory == category,
+                                label = PoiCategoryLabels.label(category, if (isEn) "en" else "vi"),
+                                icon = poiCategoryEmoji(category),
+                                count = categoryCounts[category] ?: 0,
+                                accent = poiCategoryAccentColor(category),
+                                onClick = {
+                                    selectedCategory = category
+                                    onCategoryChanged(category)
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
-                        FilterChip(
-                            selected = selectedCategory == key,
-                            onClick = {
-                                selectedCategory = key
-                                onCategoryChanged(key)
-                            },
-                            label = { Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                        )
+                        if (rowCategories.size == 1) Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -1242,7 +1383,7 @@ private fun PlacesDirectoryTabScreen(
                 val liveDist = pin.distanceMeters ?: 0.0
                 val unlocked = spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation &&
                     spatialPose.accuracyMeters <= 50f && pin.canUnlockAr(liveDist)
-                val isFood = isFoodCategory(pin.category)
+                val categoryAccent = poiCategoryAccentColor(pin.category)
 
                 Card(
                     shape = RoundedCornerShape(18.dp),
@@ -1263,7 +1404,7 @@ private fun PlacesDirectoryTabScreen(
                                 modifier = Modifier.fillMaxSize()
                             )
                             Surface(
-                                color = if (isFood) BrandColors.Terracotta else BrandColors.PrimaryDeep.copy(alpha = 0.82f),
+                                color = categoryAccent.copy(alpha = 0.94f),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
@@ -1273,12 +1414,7 @@ private fun PlacesDirectoryTabScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = if (isFood) Icons.Default.Restaurant else Icons.Default.AccountBalance,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(13.dp)
-                                    )
+                                    Text(poiCategoryEmoji(pin.category), fontSize = 12.sp)
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = PoiCategoryLabels.label(pin.category, if (isEn) "en" else "vi"),
@@ -2140,6 +2276,7 @@ private fun PoiCulturalStoryCard(
 ) {
     val isEn = selectedLanguage.equals("en", ignoreCase = true)
     val isFood = isFoodCategory(detail.category)
+    var previewPhoto by remember { mutableStateOf<CommunityPhotoDto?>(null) }
 
     Surface(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -2320,6 +2457,7 @@ private fun PoiCulturalStoryCard(
                     photo = communityPhotos.first(),
                     isEnglish = isEn,
                     onToggleLikePhoto = onToggleLikePhoto,
+                    onOpenPhoto = { previewPhoto = it },
                     modifier = Modifier.fillMaxWidth().height(198.dp)
                 )
                 else -> Row(
@@ -2330,6 +2468,7 @@ private fun PoiCulturalStoryCard(
                         photo = communityPhotos[0],
                         isEnglish = isEn,
                         onToggleLikePhoto = onToggleLikePhoto,
+                        onOpenPhoto = { previewPhoto = it },
                         modifier = Modifier.weight(1.15f).fillMaxHeight()
                     )
                     Column(
@@ -2341,6 +2480,7 @@ private fun PoiCulturalStoryCard(
                                 photo = photo,
                                 isEnglish = isEn,
                                 onToggleLikePhoto = onToggleLikePhoto,
+                                onOpenPhoto = { previewPhoto = it },
                                 modifier = Modifier.weight(1f).fillMaxWidth()
                             )
                         }
@@ -2356,12 +2496,21 @@ private fun PoiCulturalStoryCard(
                             photo = photo,
                             isEnglish = isEn,
                             onToggleLikePhoto = onToggleLikePhoto,
+                            onOpenPhoto = { previewPhoto = it },
                             modifier = Modifier.width(178.dp).height(132.dp)
                         )
                     }
                 }
             }
         }
+    }
+
+    previewPhoto?.let { photo ->
+        FullscreenCommunityPhotoPreview(
+            photo = photo,
+            isEnglish = isEn,
+            onDismiss = { previewPhoto = null }
+        )
     }
 }
 
@@ -2370,9 +2519,14 @@ private fun CommunityPhotoTile(
     photo: CommunityPhotoDto,
     isEnglish: Boolean,
     onToggleLikePhoto: (String) -> Unit,
+    onOpenPhoto: (CommunityPhotoDto) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier.clip(RoundedCornerShape(16.dp))) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onOpenPhoto(photo) }
+    ) {
         AsyncImage(
             model = photo.imageUrl,
             contentDescription = photo.caption ?: photo.authorDisplayName,
@@ -2427,6 +2581,78 @@ private fun CommunityPhotoTile(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+    }
+}
+
+@Composable
+private fun FullscreenCommunityPhotoPreview(
+    photo: CommunityPhotoDto,
+    isEnglish: Boolean,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            AsyncImage(
+                model = photo.imageUrl,
+                contentDescription = photo.caption ?: photo.authorDisplayName,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 12.dp, top = 8.dp)
+                    .size(46.dp)
+                    .background(Color.Black.copy(alpha = 0.58f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (isEnglish) "Back to place" else "Quay lại địa điểm",
+                    tint = Color.White
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))
+                        )
+                    )
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
+            ) {
+                photo.caption?.takeIf { it.isNotBlank() }?.let { caption ->
+                    Text(
+                        text = caption,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                Text(
+                    text = if (isEnglish) "Photo by ${photo.authorDisplayName}" else "Ảnh của ${photo.authorDisplayName}",
+                    color = BrandColors.Cream,
+                    fontSize = 13.sp
+                )
+            }
         }
     }
 }

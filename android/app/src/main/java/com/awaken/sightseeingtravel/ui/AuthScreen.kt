@@ -1,6 +1,7 @@
 package com.awaken.sightseeingtravel.ui
 
 import android.util.Patterns
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -111,6 +112,24 @@ internal fun AuthScreen(
         AuthPage.FORGOT_PASSWORD -> emailIsValid
         AuthPage.RESET_PASSWORD -> emailIsValid && resetCode.length == 8 &&
             password.length >= 8 && password == confirmPassword
+    }
+    val navigateBack: () -> Unit = {
+        page = if (page == AuthPage.FORGOT_PASSWORD || page == AuthPage.RESET_PASSWORD) {
+            AuthPage.SIGN_IN
+        } else {
+            AuthPage.WELCOME
+        }
+        password = ""
+        confirmPassword = ""
+        resetCode = ""
+        passwordVisible = false
+        confirmPasswordVisible = false
+        localError = null
+        onClearError()
+    }
+
+    BackHandler(enabled = page != AuthPage.WELCOME) {
+        navigateBack()
     }
 
     Box(
@@ -277,20 +296,7 @@ internal fun AuthScreen(
                         onClearError()
                     },
                     onResendResetCode = { onRequestPasswordReset(trimmedEmail) },
-                    onBack = {
-                        page = if (page == AuthPage.FORGOT_PASSWORD || page == AuthPage.RESET_PASSWORD) {
-                            AuthPage.SIGN_IN
-                        } else {
-                            AuthPage.WELCOME
-                        }
-                        password = ""
-                        confirmPassword = ""
-                        resetCode = ""
-                        passwordVisible = false
-                        confirmPasswordVisible = false
-                        localError = null
-                        onClearError()
-                    },
+                    onBack = navigateBack,
                     onSwitchPage = {
                         page = if (page == AuthPage.SIGN_IN) AuthPage.REGISTER else AuthPage.SIGN_IN
                         password = ""
