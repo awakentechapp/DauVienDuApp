@@ -106,6 +106,16 @@ public static class DatabaseInitializerAndSeeder
             await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
         }
 
+        var poiAddressMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0009_PoiAddress.sql")
+            ?? throw new InvalidOperationException("POI address migration resource is missing.");
+        await using (poiAddressMigration)
+        using (var reader = new StreamReader(poiAddressMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await attractionsDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users

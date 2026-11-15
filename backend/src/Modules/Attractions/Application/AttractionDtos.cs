@@ -33,7 +33,8 @@ public sealed record PoiDetailDto(
     bool CanActivateAr,
     string? CoverImageUrl,
     int CommunityPhotoCount,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? Address = null);
 
 public sealed record PoiLocalizationInputDto(
     string LanguageCode,
@@ -50,7 +51,8 @@ public sealed record CreatePoiRequest(
     bool SaveAsDraft,
     string? CoverImageUrl,
     IReadOnlyList<PoiLocalizationInputDto> Localizations,
-    string? Category = null);
+    string? Category = null,
+    string? Address = null);
 
 public sealed record UpdatePoiRequest(
     double Latitude,
@@ -58,7 +60,8 @@ public sealed record UpdatePoiRequest(
     double ActivationRadiusMeters,
     string? CoverImageUrl,
     IReadOnlyList<PoiLocalizationInputDto> Localizations,
-    string? Category = null);
+    string? Category = null,
+    string? Address = null);
 
 public sealed record RejectPoiRequest(
     string Reason);
@@ -78,4 +81,5 @@ public sealed record AdminPoiDto(
     DateTimeOffset? ApprovedAt,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<PoiLocalizationInputDto> Localizations);
+    IReadOnlyList<PoiLocalizationInputDto> Localizations,
+    string? Address = null);

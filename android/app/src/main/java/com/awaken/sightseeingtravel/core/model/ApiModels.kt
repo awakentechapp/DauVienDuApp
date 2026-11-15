@@ -217,7 +217,8 @@ data class PoiDetailDto(
     @SerializedName("arInfoCards") val arInfoCards: List<ArInfoCardDto> = emptyList(),
     @SerializedName("highlightedCommunityPhotos") val highlightedCommunityPhotos: List<CommunityPhotoDto> = emptyList(),
     @SerializedName("status") val status: String = "Published",
-    @SerializedName("rejectionReason") val rejectionReason: String? = null
+    @SerializedName("rejectionReason") val rejectionReason: String? = null,
+    @SerializedName("address") val address: String? = null
 ) {
     fun isWithinUnlockRadius(liveDistanceMeters: Double?): Boolean {
         val dist = liveDistanceMeters ?: distanceMeters
@@ -437,7 +438,8 @@ data class CreateOrUpdatePoiRequest(
     @SerializedName("audioGuideUrl") val audioGuideUrl: String? = null,
     @SerializedName(value = "localizations", alternate = ["translations"]) val translations: List<PoiTranslationInputDto>,
     @SerializedName("arInfoCards") val arInfoCards: List<ArInfoCardInputDto> = emptyList(),
-    @SerializedName("saveAsDraft") val saveAsDraft: Boolean = false
+    @SerializedName("saveAsDraft") val saveAsDraft: Boolean = false,
+    @SerializedName("address") val address: String? = null
 )
 
 data class ApprovePoiRequest(
@@ -466,7 +468,8 @@ data class AdminPoiDto(
     @SerializedName("shortSummaryEn") val shortSummaryEn: String = "",
     @SerializedName("arInfoCardCount") val arInfoCardCount: Int = 0,
     @SerializedName("coverImageUrl") val coverImageUrl: String? = null,
-    @SerializedName("localizations") val localizations: List<PoiTranslationInputDto> = emptyList()
+    @SerializedName("localizations") val localizations: List<PoiTranslationInputDto> = emptyList(),
+    @SerializedName("address") val address: String? = null
 ) {
     val parsedStatus: PoiStatus
         get() = PoiStatus.fromString(status)

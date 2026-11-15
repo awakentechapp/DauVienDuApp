@@ -1269,6 +1269,7 @@ private fun CreatePoiDialog(
     val initialEn = remember(initialPoi?.id) { initialPoi?.localizations?.firstOrNull { it.languageCode.equals("en", true) } }
     var titleVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.title.orEmpty()) }
     var titleEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.title.orEmpty()) }
+    var address by remember(initialPoi?.id) { mutableStateOf(initialPoi?.address.orEmpty()) }
     var summaryVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.shortSummary.orEmpty()) }
     var summaryEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.shortSummary.orEmpty()) }
     var storyVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.culturalStoryMarkdown.orEmpty()) }
@@ -1357,6 +1358,13 @@ private fun CreatePoiDialog(
                     onValueChange = { titleEn = it },
                     label = { Text("Title (English - EN)") },
                     modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it.take(500) },
+                    label = { Text(if (selectedLanguage.equals("en", true)) "Address" else "Địa chỉ") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 2
                 )
                 Text(
                     text = if (selectedLanguage.equals("en", true)) "Category" else "Danh mục",
@@ -1522,6 +1530,7 @@ private fun CreatePoiDialog(
                             latitude = lat,
                             longitude = lng,
                             activationRadiusMeters = radius,
+                            address = address.trim(),
                             coverImageUrl = initialPoi?.coverImageUrl,
                             translations = listOf(
                                 PoiTranslationInputDto(

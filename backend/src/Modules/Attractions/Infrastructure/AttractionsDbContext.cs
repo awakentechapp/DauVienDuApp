@@ -40,6 +40,9 @@ public sealed class AttractionsDbContext : DbContext
             entity.Property(x => x.Longitude)
                 .IsRequired();
 
+            entity.Property(x => x.Address)
+                .HasMaxLength(PointOfInterest.MaxAddressLength);
+
             entity.Property(x => x.ActivationRadiusMeters)
                 .IsRequired();
 

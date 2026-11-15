@@ -14,6 +14,7 @@ public enum PoiStatus
 
 public sealed class PointOfInterest : AuditableEntity
 {
+    public const int MaxAddressLength = 500;
     public const double DefaultActivationRadiusMeters = 100.0;
     public const double MinActivationRadiusMeters = 10.0;
     public const double MaxActivationRadiusMeters = 2000.0;
@@ -22,6 +23,7 @@ public sealed class PointOfInterest : AuditableEntity
     public string Category { get; private set; } = PoiCategories.HistoricalSite;
     public double Latitude { get; private set; }
     public double Longitude { get; private set; }
+    public string? Address { get; private set; }
     public double ActivationRadiusMeters { get; private set; } = DefaultActivationRadiusMeters;
     public string? CoverImageUrl { get; private set; }
     public string? CoverObjectKey { get; private set; }
@@ -47,7 +49,8 @@ public sealed class PointOfInterest : AuditableEntity
         Guid createdBy,
         UserRole creatorRole,
         bool saveAsDraft,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? address = null)
     {
         if (creatorRole is not (UserRole.Admin or UserRole.SuperAdmin))
         {
@@ -70,6 +73,14 @@ public sealed class PointOfInterest : AuditableEntity
             return Result.Failure<PointOfInterest>(new Error(
                 "POI_INVALID_CATEGORY",
                 "Category must be one of the supported POI categories.",
+                ErrorType.Validation));
+        }
+
+        if (!string.IsNullOrWhiteSpace(address) && address.Trim().Length > MaxAddressLength)
+        {
+            return Result.Failure<PointOfInterest>(new Error(
+                "POI_INVALID_ADDRESS",
+                $"Address must not exceed {MaxAddressLength} characters.",
                 ErrorType.Validation));
         }
 
@@ -116,6 +127,7 @@ public sealed class PointOfInterest : AuditableEntity
             Category = normalizedCategory,
             Latitude = latitude,
             Longitude = longitude,
+            Address = NormalizeAddress(address),
             ActivationRadiusMeters = radius,
             CoverImageUrl = string.IsNullOrWhiteSpace(coverImageUrl) ? null : coverImageUrl.Trim(),
             Status = initialStatus,
@@ -137,7 +149,8 @@ public sealed class PointOfInterest : AuditableEntity
         string? coverImageUrl,
         UserRole editorRole,
         Guid editorId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? address = null)
     {
         if (editorRole is not (UserRole.Admin or UserRole.SuperAdmin))
         {
@@ -164,6 +177,14 @@ public sealed class PointOfInterest : AuditableEntity
                 ErrorType.Validation));
         }
 
+        if (!string.IsNullOrWhiteSpace(address) && address.Trim().Length > MaxAddressLength)
+        {
+            return Result.Failure(new Error(
+                "POI_INVALID_ADDRESS",
+                $"Address must not exceed {MaxAddressLength} characters.",
+                ErrorType.Validation));
+        }
+
         var radius = activationRadiusMeters <= 0 ? DefaultActivationRadiusMeters : activationRadiusMeters;
         if (radius is < MinActivationRadiusMeters or > MaxActivationRadiusMeters)
         {
@@ -176,6 +197,10 @@ public sealed class PointOfInterest : AuditableEntity
         Latitude = latitude;
         Longitude = longitude;
         Category = normalizedCategory;
+        if (address is not null)
+        {
+            Address = NormalizeAddress(address);
+        }
         ActivationRadiusMeters = radius;
 
         if (!string.IsNullOrWhiteSpace(coverImageUrl))
@@ -278,4 +303,7 @@ public sealed class PointOfInterest : AuditableEntity
 
     public static string NormalizeCode(string code) =>
         code.Trim().ToUpperInvariant().Replace(' ', '-');
+
+    private static string? NormalizeAddress(string? address) =>
+        string.IsNullOrWhiteSpace(address) ? null : address.Trim();
 }

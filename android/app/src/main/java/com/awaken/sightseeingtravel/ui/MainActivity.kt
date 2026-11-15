@@ -2349,6 +2349,29 @@ private fun PoiCulturalStoryCard(
                 }
             }
 
+            detail.address?.trim()?.takeIf(String::isNotEmpty)?.let { address ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = if (isEn) "Address" else "Địa chỉ",
+                        tint = BrandColors.Primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = address,
+                        fontSize = 13.sp,
+                        color = BrandColors.MutedText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // Primary actions: open AR when available or request directions to the pin.

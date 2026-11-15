@@ -191,7 +191,8 @@ public sealed class AttractionService : IAttractionService
             canActivateAr,
             GetCoverImageUrl(poi),
             photoCount,
-            poi.UpdatedAt);
+            poi.UpdatedAt,
+            poi.Address);
 
         return Result.Success(dto);
     }
@@ -260,7 +261,8 @@ public sealed class AttractionService : IAttractionService
             _currentUser.UserId,
             _currentUser.Role,
             request.SaveAsDraft,
-            now);
+            now,
+            request.Address);
 
         if (createResult.IsFailure)
         {
@@ -319,7 +321,8 @@ public sealed class AttractionService : IAttractionService
             request.CoverImageUrl,
             _currentUser.Role,
             _currentUser.UserId,
-            now);
+            now,
+            request.Address);
 
         if (updateResult.IsFailure)
         {
@@ -658,6 +661,7 @@ public sealed class AttractionService : IAttractionService
             poi.ApprovedAt,
             poi.CreatedAt,
             poi.UpdatedAt,
-            localizations);
+            localizations,
+            poi.Address);
     }
 }

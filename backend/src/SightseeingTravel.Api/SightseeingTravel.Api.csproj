@@ -27,6 +27,7 @@
     <EmbeddedResource Include="Migrations/0006_IdentityPasswordReset.sql" />
     <EmbeddedResource Include="Migrations/0007_ArModelAssets.sql" />
     <EmbeddedResource Include="Migrations/0008_ArContentPlacementScale.sql" />
+    <EmbeddedResource Include="Migrations/0009_PoiAddress.sql" />
   </ItemGroup>
 
   <ItemGroup>
