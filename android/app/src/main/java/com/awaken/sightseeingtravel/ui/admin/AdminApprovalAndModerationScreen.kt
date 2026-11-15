@@ -38,6 +38,8 @@ import kotlinx.coroutines.launch
 import androidx.core.content.ContextCompat
 import java.io.File
 
+private const val UNCLASSIFIED_POI_AREA_FILTER = "__unclassified__"
+
 /**
  * Role-Aware Admin & SuperAdmin Management Console:
  * - `Admin`: Can create/edit POIs + multilingual stories + AR Info Cards (status = `PendingApproval`)
@@ -227,6 +229,7 @@ fun AdminApprovalAndModerationScreen(
     // ========================================================================
     if (showCreatePoiDialog) {
         CreatePoiDialog(
+            knownPoiAreas = adminPois,
             selectedLanguage = selectedLanguage,
             defaultLatitude = defaultLatitude,
             defaultLongitude = defaultLongitude,
@@ -244,6 +247,7 @@ fun AdminApprovalAndModerationScreen(
     poiForEdit?.let { poi ->
         CreatePoiDialog(
             initialPoi = poi,
+            knownPoiAreas = adminPois,
             selectedLanguage = selectedLanguage,
             defaultLatitude = defaultLatitude,
             defaultLongitude = defaultLongitude,
@@ -440,6 +444,73 @@ private fun PoiApprovalWorkflowTab(
     onDeletePoi: (AdminPoiDto) -> Unit,
     onDeleteArCard: (AdminArInfoCardDto) -> Unit
 ) {
+    val isEn = selectedLanguage.equals("en", ignoreCase = true)
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedProvince by remember { mutableStateOf<String?>(null) }
+    var selectedWard by remember { mutableStateOf<String?>(null) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    val provinceValues = adminPois.mapNotNull { it.province?.takeIf(String::isNotBlank) }
+        .distinctBy { it.lowercase() }
+        .sortedBy { it.lowercase() }
+    val wardScope = adminPois.filter { poi ->
+        selectedProvince != null && when (selectedProvince) {
+            UNCLASSIFIED_POI_AREA_FILTER -> poi.province.isNullOrBlank()
+            else -> poi.province.equals(selectedProvince, ignoreCase = true)
+        }
+    }
+    val wardValues = wardScope.mapNotNull { it.ward?.takeIf(String::isNotBlank) }
+        .distinctBy { it.lowercase() }
+        .sortedBy { it.lowercase() }
+    val provinceChoices = buildList {
+        add(null to if (isEn) "All provinces/cities" else "Tất cả Tỉnh/Thành")
+        if (adminPois.any { it.province.isNullOrBlank() }) {
+            add(UNCLASSIFIED_POI_AREA_FILTER to if (isEn) "Unclassified province" else "Chưa phân loại Tỉnh/Thành")
+        }
+        provinceValues.forEach { add(it to it) }
+    }
+    val wardChoices = buildList {
+        add(null to if (selectedProvince == null) {
+            if (isEn) "Select province first" else "Chọn Tỉnh/Thành trước"
+        } else {
+            if (isEn) "All wards/communes" else "Tất cả Phường/Xã"
+        })
+        if (wardScope.any { it.ward.isNullOrBlank() }) {
+            add(UNCLASSIFIED_POI_AREA_FILTER to if (isEn) "Unclassified ward" else "Chưa phân loại Phường/Xã")
+        }
+        wardValues.forEach { add(it to it) }
+    }
+    val categoryChoices = buildList {
+        add(null to if (isEn) "All categories" else "Tất cả danh mục")
+        PoiCategoryLabels.values.forEach { category ->
+            add(category to PoiCategoryLabels.label(category, selectedLanguage))
+        }
+    }
+    val visiblePois = adminPois.filter { poi ->
+        val matchesProvince = when (selectedProvince) {
+            null -> true
+            UNCLASSIFIED_POI_AREA_FILTER -> poi.province.isNullOrBlank()
+            else -> poi.province.equals(selectedProvince, ignoreCase = true)
+        }
+        val matchesWard = when (selectedWard) {
+            null -> true
+            UNCLASSIFIED_POI_AREA_FILTER -> poi.ward.isNullOrBlank()
+            else -> poi.ward.equals(selectedWard, ignoreCase = true)
+        }
+        val matchesCategory = selectedCategory == null ||
+            PoiCategoryLabels.normalize(poi.category) == selectedCategory
+        val searchableText = listOf(
+            poi.titleFor("vi"), poi.titleFor("en"), poi.slug, poi.address.orEmpty(),
+            poi.province.orEmpty(), poi.ward.orEmpty()
+        ).joinToString(" ")
+        matchesProvince && matchesWard && matchesCategory &&
+            (searchQuery.isBlank() || searchableText.contains(searchQuery.trim(), ignoreCase = true))
+    }.sortedWith(
+        compareBy<AdminPoiDto> { it.province.orEmpty().lowercase() }
+            .thenBy { it.ward.orEmpty().lowercase() }
+            .thenBy { PoiCategoryLabels.normalize(it.category) }
+            .thenBy { it.titleFor("vi").lowercase() }
+    )
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Role explanation banner
         Surface(
@@ -494,11 +565,73 @@ private fun PoiApprovalWorkflowTab(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text(if (isEn) "Search POI" else "Tìm POI") },
+            placeholder = { Text(if (isEn) "Name, address or code" else "Tên, địa chỉ hoặc mã POI") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = if (searchQuery.isNotBlank()) {
+                {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = if (isEn) "Clear" else "Xóa")
+                    }
+                }
+            } else null
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            AdminPoiFilterDropdown(
+                label = if (isEn) "Province/city" else "Tỉnh/Thành",
+                selectedValue = selectedProvince,
+                choices = provinceChoices,
+                onValueSelected = {
+                    selectedProvince = it
+                    selectedWard = null
+                },
+                modifier = Modifier.weight(1f)
+            )
+            AdminPoiFilterDropdown(
+                label = if (isEn) "Ward/commune" else "Phường/Xã",
+                selectedValue = selectedWard,
+                choices = wardChoices,
+                onValueSelected = { selectedWard = it },
+                enabled = selectedProvince != null,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        AdminPoiFilterDropdown(
+            label = if (isEn) "POI category" else "Danh mục POI",
+            selectedValue = selectedCategory,
+            choices = categoryChoices,
+            onValueSelected = { selectedCategory = it },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = if (isEn) "Showing ${visiblePois.size} of ${adminPois.size} POIs" else "Hiển thị ${visiblePois.size}/${adminPois.size} POI",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)
+        )
+
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(adminPois, key = { it.id }) { poi ->
+            if (visiblePois.isEmpty()) {
+                item {
+                    Text(
+                        text = if (isEn) "No POIs match these filters." else "Không có POI phù hợp với bộ lọc.",
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            items(visiblePois, key = { it.id }) { poi ->
                 val poiArCards = adminArCardsByPoi[poi.id].orEmpty()
                 val arCardCount = adminArCardsByPoi[poi.id]?.size ?: poi.arInfoCardCount
                 Card(
@@ -541,6 +674,16 @@ private fun PoiApprovalWorkflowTab(
                             text = poi.titleFor("vi"),
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
+                        )
+                        val provinceLabel = poi.province?.takeIf(String::isNotBlank)
+                            ?: if (isEn) "Unclassified province/city" else "Chưa phân loại Tỉnh/Thành"
+                        val wardLabel = poi.ward?.takeIf(String::isNotBlank)
+                            ?: if (isEn) "Unclassified ward/commune" else "Chưa phân loại Phường/Xã"
+                        Text(
+                            text = "$provinceLabel  ›  $wardLabel  ›  ${PoiCategoryLabels.label(poi.category, selectedLanguage)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = BrandColors.Primary,
+                            fontWeight = FontWeight.SemiBold
                         )
                         if (poi.titleFor("en").isNotBlank() && poi.titleFor("en") != poi.titleFor("vi")) {
                             Text(
@@ -674,6 +817,144 @@ private fun PoiApprovalWorkflowTab(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminPoiFilterDropdown(
+    label: String,
+    selectedValue: String?,
+    choices: List<Pair<String?, String>>,
+    onValueSelected: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    var expanded by remember(label) { mutableStateOf(false) }
+    val selectedLabel = choices.firstOrNull { it.first == selectedValue }?.second ?: label
+
+    Box(modifier = modifier) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth(), enabled = enabled) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.labelSmall)
+                Text(
+                    selectedLabel,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 320.dp)
+        ) {
+            choices.forEach { (value, title) ->
+                DropdownMenuItem(
+                    text = { Text(title) },
+                    onClick = {
+                        onValueSelected(value)
+                        expanded = false
+                    },
+                    trailingIcon = {
+                        if (value == selectedValue) Icon(Icons.Default.Check, contentDescription = null)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminPoiSelectionDropdown(
+    label: String,
+    value: String,
+    placeholder: String,
+    choices: List<String>,
+    onValueSelected: (String) -> Unit
+) {
+    var expanded by remember(label) { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.labelSmall)
+                Text(
+                    value.ifBlank { placeholder },
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 360.dp)
+        ) {
+            choices.forEach { choice ->
+                DropdownMenuItem(
+                    text = { Text(choice) },
+                    onClick = {
+                        onValueSelected(choice)
+                        expanded = false
+                    },
+                    trailingIcon = {
+                        if (choice == value) Icon(Icons.Default.Check, contentDescription = null)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PoiAreaAutocompleteField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    knownValues: List<String>
+) {
+    var expanded by remember(label) { mutableStateOf(false) }
+    val suggestions = knownValues
+        .filter { value.isBlank() || it.contains(value.trim(), ignoreCase = true) }
+        .distinctBy { it.lowercase() }
+        .take(50)
+
+    Box {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = true
+            },
+            label = { Text(label) },
+            placeholder = { Text(placeholder) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            trailingIcon = {
+                if (suggestions.isNotEmpty()) {
+                    IconButton(onClick = { expanded = !expanded }) {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                }
+            }
+        )
+        DropdownMenu(
+            expanded = expanded && suggestions.isNotEmpty(),
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 280.dp)
+        ) {
+            suggestions.forEach { suggestion ->
+                DropdownMenuItem(
+                    text = { Text(suggestion) },
+                    onClick = {
+                        onValueChange(suggestion)
+                        expanded = false
+                    }
+                )
             }
         }
     }
@@ -1256,6 +1537,7 @@ private fun EditArInfoCardDialog(
 @Composable
 private fun CreatePoiDialog(
     initialPoi: AdminPoiDto? = null,
+    knownPoiAreas: List<AdminPoiDto>,
     selectedLanguage: String,
     defaultLatitude: Double,
     defaultLongitude: Double,
@@ -1265,11 +1547,18 @@ private fun CreatePoiDialog(
     onDismiss: () -> Unit,
     onSubmit: (CreateOrUpdatePoiRequest, Uri?) -> Unit
 ) {
+    val context = LocalContext.current
+    val administrativeAreas = remember { VietnamAdministrativeAreaCatalog.load(context) }
+    val officialProvinceNames = remember(administrativeAreas) {
+        administrativeAreas.map { it.province }.distinct()
+    }
     val initialVi = remember(initialPoi?.id) { initialPoi?.localizations?.firstOrNull { it.languageCode.equals("vi", true) } }
     val initialEn = remember(initialPoi?.id) { initialPoi?.localizations?.firstOrNull { it.languageCode.equals("en", true) } }
     var titleVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.title.orEmpty()) }
     var titleEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.title.orEmpty()) }
     var address by remember(initialPoi?.id) { mutableStateOf(initialPoi?.address.orEmpty()) }
+    var province by remember(initialPoi?.id) { mutableStateOf(initialPoi?.province.orEmpty()) }
+    var ward by remember(initialPoi?.id) { mutableStateOf(initialPoi?.ward.orEmpty()) }
     var summaryVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.shortSummary.orEmpty()) }
     var summaryEn by remember(initialPoi?.id) { mutableStateOf(initialEn?.shortSummary.orEmpty()) }
     var storyVi by remember(initialPoi?.id) { mutableStateOf(initialVi?.culturalStoryMarkdown.orEmpty()) }
@@ -1286,6 +1575,29 @@ private fun CreatePoiDialog(
     var arCardBody by remember { mutableStateOf("360° Spatial AR Cultural Note anchored at this landmark.") }
     var arCardAzimuth by remember { mutableStateOf("${((currentAzimuthDegrees % 360f) + 360f) % 360f}") }
     var coverImageUri by remember(initialPoi?.id) { mutableStateOf<Uri?>(null) }
+    val provinceChoices = remember(initialPoi?.province, officialProvinceNames) {
+        (officialProvinceNames + listOfNotNull(
+            initialPoi?.province?.takeIf { current ->
+                current.isNotBlank() && officialProvinceNames.none { it.equals(current, ignoreCase = true) }
+            }
+        )).distinctBy { it.lowercase() }
+    }
+    val officialWardChoices = remember(administrativeAreas, province) {
+        administrativeAreas.asSequence()
+            .filter { it.province.equals(province.trim(), ignoreCase = true) }
+            .map { it.commune }
+            .distinct()
+            .sortedBy { it.lowercase() }
+            .toList()
+    }
+    val wardChoices = remember(officialWardChoices, knownPoiAreas, province) {
+        (officialWardChoices + knownPoiAreas.asSequence()
+            .filter { it.province.equals(province.trim(), ignoreCase = true) }
+            .mapNotNull { it.ward?.takeIf(String::isNotBlank) }
+            .toList())
+            .distinctBy { it.lowercase() }
+            .sortedBy { it.lowercase() }
+    }
     val pickCoverImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         coverImageUri = uri
     }
@@ -1298,6 +1610,11 @@ private fun CreatePoiDialog(
         parsedLongitude != null && parsedLongitude in -180.0..180.0
     val canSubmit = (titleVi.isNotBlank() || titleEn.isNotBlank()) && hasValidCoordinates &&
         parsedRadius != null && parsedRadius > 0.0 &&
+        (ward.isBlank() || province.isNotBlank()) &&
+        (initialPoi != null || (
+            provinceChoices.any { it.equals(province.trim(), ignoreCase = true) } &&
+                wardChoices.any { it.equals(ward.trim(), ignoreCase = true) }
+            )) &&
         (initialPoi != null || (parsedAzimuth != null && parsedAzimuth >= 0f && parsedAzimuth < 360f))
 
     LaunchedEffect(hasFreshGpsFix, defaultLatitude, defaultLongitude) {
@@ -1366,6 +1683,49 @@ private fun CreatePoiDialog(
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 2
                 )
+                AdminPoiSelectionDropdown(
+                    value = province,
+                    label = if (selectedLanguage.equals("en", true)) "Province / city" else "Tỉnh / Thành phố",
+                    placeholder = if (selectedLanguage.equals("en", true)) "Choose a province/city" else "Chọn Tỉnh/Thành phố",
+                    choices = provinceChoices,
+                    onValueSelected = { selectedProvince ->
+                        if (!province.equals(selectedProvince, ignoreCase = true)) ward = ""
+                        province = selectedProvince
+                    }
+                )
+                PoiAreaAutocompleteField(
+                    value = ward,
+                    onValueChange = { ward = it.take(150) },
+                    label = if (selectedLanguage.equals("en", true)) "Ward / commune / special zone" else "Phường / Xã / Đặc khu",
+                    placeholder = if (selectedLanguage.equals("en", true)) "Type to search, then choose a ward/commune" else "Nhập để tìm rồi chọn Phường/Xã/Đặc khu",
+                    knownValues = wardChoices
+                )
+                if (initialPoi == null && province.isBlank()) {
+                    Text(
+                        text = if (selectedLanguage.equals("en", true)) "Choose a province/city to classify this POI." else "Hãy chọn Tỉnh/Thành phố để phân loại POI.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else if (initialPoi == null && ward.isBlank()) {
+                    Text(
+                        text = if (selectedLanguage.equals("en", true)) "Select a ward/commune from the official list to finish the location hierarchy." else "Hãy chọn Phường/Xã/Đặc khu trong danh sách để hoàn tất phân cấp địa chỉ.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else if (initialPoi == null && wardChoices.none { it.equals(ward.trim(), ignoreCase = true) }) {
+                    Text(
+                        text = if (selectedLanguage.equals("en", true)) "Choose a matching result from the list so POI filters stay consistent." else "Hãy chọn kết quả phù hợp trong danh sách để bộ lọc POI luôn thống nhất.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if (ward.isNotBlank() && province.isBlank()) {
+                    Text(
+                        text = if (selectedLanguage.equals("en", true)) "Enter the province/city before the ward/commune." else "Hãy nhập Tỉnh/Thành phố trước khi nhập Phường/Xã.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 Text(
                     text = if (selectedLanguage.equals("en", true)) "Category" else "Danh mục",
                     style = MaterialTheme.typography.labelLarge,
@@ -1531,6 +1891,8 @@ private fun CreatePoiDialog(
                             longitude = lng,
                             activationRadiusMeters = radius,
                             address = address.trim(),
+                            province = province.trim(),
+                            ward = ward.trim(),
                             coverImageUrl = initialPoi?.coverImageUrl,
                             translations = listOf(
                                 PoiTranslationInputDto(

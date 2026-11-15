@@ -43,6 +43,12 @@ public sealed class AttractionsDbContext : DbContext
             entity.Property(x => x.Address)
                 .HasMaxLength(PointOfInterest.MaxAddressLength);
 
+            entity.Property(x => x.Province)
+                .HasMaxLength(PointOfInterest.MaxProvinceLength);
+
+            entity.Property(x => x.Ward)
+                .HasMaxLength(PointOfInterest.MaxWardLength);
+
             entity.Property(x => x.ActivationRadiusMeters)
                 .IsRequired();
 
@@ -75,6 +81,9 @@ public sealed class AttractionsDbContext : DbContext
 
             entity.HasIndex(x => new { x.Status, x.Latitude, x.Longitude })
                 .HasDatabaseName("IX_points_of_interest_status_geo");
+
+            entity.HasIndex(x => new { x.Province, x.Ward, x.Category, x.Status })
+                .HasDatabaseName("IX_points_of_interest_admin_area_category_status");
 
             entity.HasMany(x => x.Localizations)
                 .WithOne()

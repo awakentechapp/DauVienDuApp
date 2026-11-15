@@ -85,6 +85,9 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     companion object {
         const val SEARCH_RADIUS_KM = 15.0
         const val SEARCH_RADIUS_METERS = 15_000.0
+        private const val NEARBY_POI_AUTO_REFRESH_DISTANCE_METERS = 250.0
+        private const val NEARBY_POI_AUTO_REFRESH_DEBOUNCE_MILLIS = 800L
+        private const val NEARBY_POI_AUTO_REFRESH_MAX_GPS_ACCURACY_METERS = 100f
     }
 
     val tokenStore = TokenStore(application)
@@ -93,6 +96,10 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     private var navigationJob: Job? = null
     private var lastNavigationRequestLocation: Pair<Double, Double>? = null
     private var lastNavigationRequestAtMillis: Long = 0L
+    private var nearbyPoisRequestJob: Job? = null
+    private var nearbyPoisRequestVersion = 0L
+    private var lastNearbyPoisRequestCenter: Pair<Double, Double>? = null
+    private var hasLoadedNearbyPoisForFreshGps = false
     val locationAndOrientationTracker = LocationAndOrientationTracker(application)
 
     val spatialPose: StateFlow<DeviceSpatialPose> = locationAndOrientationTracker.spatialPose
@@ -127,7 +134,47 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                     maybeRefreshNavigationRoute()
                 }
         }
+
+        // Reload the shared Home/Places data as the user moves so newly nearby
+        // POIs enter the 15 km result set without requiring a manual refresh.
+        viewModelScope.launch {
+            spatialPose
+                .filter(::isUsableForNearbyPoiRefresh)
+                .map { it.latitude to it.longitude }
+                .distinctUntilChanged { previous, current ->
+                    LocationAndOrientationTracker.calculateDistanceMeters(
+                        previous.first,
+                        previous.second,
+                        current.first,
+                        current.second
+                    ) < NEARBY_POI_AUTO_REFRESH_DISTANCE_METERS
+                }
+                .collectLatest {
+                    delay(NEARBY_POI_AUTO_REFRESH_DEBOUNCE_MILLIS)
+                    val pose = spatialPose.value
+                    if (tokenStore.accessToken.isNullOrBlank() || !isUsableForNearbyPoiRefresh(pose)) {
+                        return@collectLatest
+                    }
+
+                    val previousCenter = lastNearbyPoisRequestCenter
+                    val hasMovedOutsideLoadedArea = previousCenter == null ||
+                        LocationAndOrientationTracker.calculateDistanceMeters(
+                            previousCenter.first,
+                            previousCenter.second,
+                            pose.latitude,
+                            pose.longitude
+                        ) >= NEARBY_POI_AUTO_REFRESH_DISTANCE_METERS
+                    if (!hasLoadedNearbyPoisForFreshGps || hasMovedOutsideLoadedArea) {
+                        loadNearbyPois(pose.latitude, pose.longitude)
+                    }
+                }
+        }
     }
+
+    private fun isUsableForNearbyPoiRefresh(pose: DeviceSpatialPose): Boolean =
+        pose.hasFreshGpsFix &&
+            !pose.isSimulatedLocation &&
+            pose.accuracyMeters <= NEARBY_POI_AUTO_REFRESH_MAX_GPS_ACCURACY_METERS
 
     fun startSensors() {
         locationAndOrientationTracker.startLocationUpdates()
@@ -423,7 +470,17 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             return
         }
 
-        viewModelScope.launch {
+        val requestVersion = ++nearbyPoisRequestVersion
+        val poseAtRequest = spatialPose.value
+        val requestUsedFreshGps = isUsableForNearbyPoiRefresh(poseAtRequest) &&
+            LocationAndOrientationTracker.calculateDistanceMeters(
+                latitude,
+                longitude,
+                poseAtRequest.latitude,
+                poseAtRequest.longitude
+            ) < NEARBY_POI_AUTO_REFRESH_DISTANCE_METERS
+        nearbyPoisRequestJob?.cancel()
+        nearbyPoisRequestJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
                 val response = apiService.getNearbyPois(
@@ -443,6 +500,9 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 }.filter { (it.distanceMeters ?: 0.0) <= SEARCH_RADIUS_METERS }
                     .sortedBy { it.distanceMeters ?: Double.MAX_VALUE }
 
+                if (requestVersion != nearbyPoisRequestVersion) return@launch
+                lastNearbyPoisRequestCenter = latitude to longitude
+                hasLoadedNearbyPoisForFreshGps = requestUsedFreshGps
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -454,6 +514,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                     )
                 }
             } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (requestVersion != nearbyPoisRequestVersion) return@launch
                 if ((error as? retrofit2.HttpException)?.code() == 401) {
                     tokenStore.clearSession()
                     _uiState.update {

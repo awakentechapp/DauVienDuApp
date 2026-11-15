@@ -116,6 +116,16 @@ public static class DatabaseInitializerAndSeeder
             await attractionsDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
         }
 
+        var poiAdministrativeAreaMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0010_PoiAdministrativeArea.sql")
+            ?? throw new InvalidOperationException("POI administrative area migration resource is missing.");
+        await using (poiAdministrativeAreaMigration)
+        using (var reader = new StreamReader(poiAdministrativeAreaMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await attractionsDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users

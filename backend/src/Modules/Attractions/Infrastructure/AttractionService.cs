@@ -262,7 +262,9 @@ public sealed class AttractionService : IAttractionService
             _currentUser.Role,
             request.SaveAsDraft,
             now,
-            request.Address);
+            request.Address,
+            request.Province,
+            request.Ward);
 
         if (createResult.IsFailure)
         {
@@ -322,7 +324,9 @@ public sealed class AttractionService : IAttractionService
             _currentUser.Role,
             _currentUser.UserId,
             now,
-            request.Address);
+            request.Address,
+            request.Province,
+            request.Ward);
 
         if (updateResult.IsFailure)
         {
@@ -662,6 +666,8 @@ public sealed class AttractionService : IAttractionService
             poi.CreatedAt,
             poi.UpdatedAt,
             localizations,
-            poi.Address);
+            poi.Address,
+            poi.Province,
+            poi.Ward);
     }
 }

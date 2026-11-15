@@ -52,7 +52,9 @@ public sealed record CreatePoiRequest(
     string? CoverImageUrl,
     IReadOnlyList<PoiLocalizationInputDto> Localizations,
     string? Category = null,
-    string? Address = null);
+    string? Address = null,
+    string? Province = null,
+    string? Ward = null);
 
 public sealed record UpdatePoiRequest(
     double Latitude,
@@ -61,7 +63,9 @@ public sealed record UpdatePoiRequest(
     string? CoverImageUrl,
     IReadOnlyList<PoiLocalizationInputDto> Localizations,
     string? Category = null,
-    string? Address = null);
+    string? Address = null,
+    string? Province = null,
+    string? Ward = null);
 
 public sealed record RejectPoiRequest(
     string Reason);
@@ -82,4 +86,6 @@ public sealed record AdminPoiDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     IReadOnlyList<PoiLocalizationInputDto> Localizations,
-    string? Address = null);
+    string? Address = null,
+    string? Province = null,
+    string? Ward = null);

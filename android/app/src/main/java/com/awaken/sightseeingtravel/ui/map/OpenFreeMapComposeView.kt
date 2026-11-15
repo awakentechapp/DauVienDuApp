@@ -388,6 +388,7 @@ private const val SOURCE_POI_SELECTED = "source-poi-selected"
 private const val LAYER_POI_SELECTED = "layer-poi-selected"
 
 private const val SOURCE_NAVIGATION_ROUTE = "source-navigation-route"
+private const val LAYER_NAVIGATION_ROUTE_CASING = "layer-navigation-route-casing"
 private const val LAYER_NAVIGATION_ROUTE = "layer-navigation-route"
 
 private const val PROP_POI_ID = "poi_id"
@@ -481,12 +482,25 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     if (style.getSource(SOURCE_NAVIGATION_ROUTE) == null) {
         style.addSource(GeoJsonSource(SOURCE_NAVIGATION_ROUTE))
     }
+    if (style.getLayer(LAYER_NAVIGATION_ROUTE_CASING) == null) {
+        style.addLayer(
+            LineLayer(LAYER_NAVIGATION_ROUTE_CASING, SOURCE_NAVIGATION_ROUTE).withProperties(
+                lineColor(Color.WHITE),
+                lineWidth(9.0f),
+                lineOpacity(0.96f),
+                lineCap("round"),
+                lineJoin("round")
+            )
+        )
+    }
     if (style.getLayer(LAYER_NAVIGATION_ROUTE) == null) {
         style.addLayer(
             LineLayer(LAYER_NAVIGATION_ROUTE, SOURCE_NAVIGATION_ROUTE).withProperties(
-                lineColor(Color.parseColor("#9A4333")),
-                lineWidth(5.0f),
-                lineOpacity(0.9f)
+                lineColor(Color.parseColor("#4285F4")),
+                lineWidth(5.5f),
+                lineOpacity(0.98f),
+                lineCap("round"),
+                lineJoin("round")
             )
         )
     }
@@ -506,7 +520,7 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
                 textFont(arrayOf("Noto Sans Regular")),
                 textOffset(arrayOf(0f, 1.8f)),
                 textColor(Color.parseColor("#622821")),
-                textHaloColor(Color.parseColor("#FFF9F0")),
+                textHaloColor(Color.WHITE),
                 textHaloWidth(2.8f)
             )
         )
@@ -641,19 +655,19 @@ private fun createUserGpsDotBitmap(density: Float): Bitmap {
     val center = sizePx / 2f
 
     val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(75, 98, 40, 33)
+        color = Color.argb(72, 66, 133, 244)
         style = Paint.Style.FILL
     }
     canvas.drawCircle(center, center, center, haloPaint)
 
     val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F6DCAD")
+        color = Color.WHITE
         style = Paint.Style.FILL
     }
     canvas.drawCircle(center, center, center * 0.62f, borderPaint)
 
     val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#622821")
+        color = Color.parseColor("#4285F4")
         style = Paint.Style.FILL
     }
     canvas.drawCircle(center, center, center * 0.46f, dotPaint)
@@ -666,14 +680,15 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
     val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val center = sizePx / 2f
-    val brand = Color.parseColor("#622821")
+    val navigationBlue = Color.parseColor("#4285F4")
+    val navigationGlyphAccent = Color.parseColor("#1A56B5")
 
     canvas.drawCircle(
         center,
         center,
         center * 0.96f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(55, 63, 29, 24)
+            color = Color.argb(58, 66, 133, 244)
             style = Paint.Style.FILL
         }
     )
@@ -682,7 +697,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
         center,
         center * 0.87f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F6DCAD")
+            color = Color.WHITE
             style = Paint.Style.FILL
         }
     )
@@ -691,20 +706,20 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
         center,
         center * 0.74f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = brand
+            color = navigationBlue
             style = Paint.Style.FILL
         }
     )
 
     val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F6DCAD")
+        color = Color.WHITE
         style = Paint.Style.STROKE
         strokeWidth = sizePx * 0.065f
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     val fillGlyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F6DCAD")
+        color = Color.WHITE
         style = Paint.Style.FILL
     }
     val path = Path()
@@ -727,7 +742,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
                 center * 0.08f,
                 center * 0.08f,
                 Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = brand
+                    color = navigationGlyphAccent
                     style = Paint.Style.FILL
                 }
             )
@@ -736,7 +751,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
                 center * 0.06f,
                 center * 0.06f,
                 Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = brand
+                    color = navigationGlyphAccent
                     style = Paint.Style.FILL
                 }
             )
@@ -744,7 +759,7 @@ private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelM
 
         NavigationTravelMode.MOTORCYCLE -> {
             val wheelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#F6DCAD")
+                color = Color.WHITE
                 style = Paint.Style.STROKE
                 strokeWidth = sizePx * 0.055f
             }

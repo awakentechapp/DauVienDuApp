@@ -15,6 +15,8 @@ public enum PoiStatus
 public sealed class PointOfInterest : AuditableEntity
 {
     public const int MaxAddressLength = 500;
+    public const int MaxProvinceLength = 150;
+    public const int MaxWardLength = 150;
     public const double DefaultActivationRadiusMeters = 100.0;
     public const double MinActivationRadiusMeters = 10.0;
     public const double MaxActivationRadiusMeters = 2000.0;
@@ -24,6 +26,8 @@ public sealed class PointOfInterest : AuditableEntity
     public double Latitude { get; private set; }
     public double Longitude { get; private set; }
     public string? Address { get; private set; }
+    public string? Province { get; private set; }
+    public string? Ward { get; private set; }
     public double ActivationRadiusMeters { get; private set; } = DefaultActivationRadiusMeters;
     public string? CoverImageUrl { get; private set; }
     public string? CoverObjectKey { get; private set; }
@@ -50,7 +54,9 @@ public sealed class PointOfInterest : AuditableEntity
         UserRole creatorRole,
         bool saveAsDraft,
         DateTimeOffset now,
-        string? address = null)
+        string? address = null,
+        string? province = null,
+        string? ward = null)
     {
         if (creatorRole is not (UserRole.Admin or UserRole.SuperAdmin))
         {
@@ -82,6 +88,14 @@ public sealed class PointOfInterest : AuditableEntity
                 "POI_INVALID_ADDRESS",
                 $"Address must not exceed {MaxAddressLength} characters.",
                 ErrorType.Validation));
+        }
+
+        var normalizedProvince = NormalizeAdministrativeArea(province);
+        var normalizedWard = NormalizeAdministrativeArea(ward);
+        var administrativeAreaError = ValidateAdministrativeArea(normalizedProvince, normalizedWard);
+        if (administrativeAreaError is not null)
+        {
+            return Result.Failure<PointOfInterest>(administrativeAreaError);
         }
 
         if (!GeoCalculator.IsValidCoordinate(latitude, longitude))
@@ -128,6 +142,8 @@ public sealed class PointOfInterest : AuditableEntity
             Latitude = latitude,
             Longitude = longitude,
             Address = NormalizeAddress(address),
+            Province = normalizedProvince,
+            Ward = normalizedWard,
             ActivationRadiusMeters = radius,
             CoverImageUrl = string.IsNullOrWhiteSpace(coverImageUrl) ? null : coverImageUrl.Trim(),
             Status = initialStatus,
@@ -150,7 +166,9 @@ public sealed class PointOfInterest : AuditableEntity
         UserRole editorRole,
         Guid editorId,
         DateTimeOffset now,
-        string? address = null)
+        string? address = null,
+        string? province = null,
+        string? ward = null)
     {
         if (editorRole is not (UserRole.Admin or UserRole.SuperAdmin))
         {
@@ -185,6 +203,14 @@ public sealed class PointOfInterest : AuditableEntity
                 ErrorType.Validation));
         }
 
+        var normalizedProvince = province is null ? Province : NormalizeAdministrativeArea(province);
+        var normalizedWard = ward is null ? Ward : NormalizeAdministrativeArea(ward);
+        var administrativeAreaError = ValidateAdministrativeArea(normalizedProvince, normalizedWard);
+        if (administrativeAreaError is not null)
+        {
+            return Result.Failure(administrativeAreaError);
+        }
+
         var radius = activationRadiusMeters <= 0 ? DefaultActivationRadiusMeters : activationRadiusMeters;
         if (radius is < MinActivationRadiusMeters or > MaxActivationRadiusMeters)
         {
@@ -200,6 +226,14 @@ public sealed class PointOfInterest : AuditableEntity
         if (address is not null)
         {
             Address = NormalizeAddress(address);
+        }
+        if (province is not null)
+        {
+            Province = normalizedProvince;
+        }
+        if (ward is not null)
+        {
+            Ward = normalizedWard;
         }
         ActivationRadiusMeters = radius;
 
@@ -306,4 +340,27 @@ public sealed class PointOfInterest : AuditableEntity
 
     private static string? NormalizeAddress(string? address) =>
         string.IsNullOrWhiteSpace(address) ? null : address.Trim();
+
+    private static string? NormalizeAdministrativeArea(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static Error? ValidateAdministrativeArea(string? province, string? ward)
+    {
+        if (province?.Length > MaxProvinceLength)
+        {
+            return new Error("POI_INVALID_PROVINCE", $"Province must not exceed {MaxProvinceLength} characters.", ErrorType.Validation);
+        }
+
+        if (ward?.Length > MaxWardLength)
+        {
+            return new Error("POI_INVALID_WARD", $"Ward/commune must not exceed {MaxWardLength} characters.", ErrorType.Validation);
+        }
+
+        if (ward is not null && province is null)
+        {
+            return new Error("POI_PROVINCE_REQUIRED", "Province/city is required when a ward/commune is provided.", ErrorType.Validation);
+        }
+
+        return null;
+    }
 }

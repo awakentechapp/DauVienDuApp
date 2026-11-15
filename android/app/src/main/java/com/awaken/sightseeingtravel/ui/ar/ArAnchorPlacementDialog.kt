@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import com.awaken.sightseeingtravel.core.model.PhotoAnchorSnapshot
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.BrandColors
 import com.google.ar.core.Plane
@@ -134,8 +135,9 @@ private fun drawPlacementText(
 
 /**
  * Live AR placement step for a community photo or an information card.
- * Tap a tracked horizontal surface to position the preview; zoom changes are
- * applied to the saved physical size so the object keeps its size next time.
+ * Information cards are placed by tapping a tracked horizontal surface. A
+ * community photo stays anchored to the GPS position and heading captured
+ * when the photo was taken; that flow only lets the user adjust its size.
  */
 @Composable
 fun ArAnchorPlacementDialog(
@@ -152,6 +154,7 @@ fun ArAnchorPlacementDialog(
     previewBitmap: Bitmap,
     previewWidthMeters: Float,
     initialScaleFactor: Float = 1f,
+    photoAnchorSnapshot: PhotoAnchorSnapshot? = null,
     selectedLanguage: String,
     onDismiss: () -> Unit,
     onConfirm: (ArAnchorPlacementResult) -> Unit
@@ -162,6 +165,29 @@ fun ArAnchorPlacementDialog(
     val materialLoader = rememberMaterialLoader(engine)
     val childNodes = rememberNodes()
     val pendingTap = remember { AtomicReference<Offset?>(null) }
+    val fixedPhotoPlacement = remember(photoAnchorSnapshot, poiLatitude, poiLongitude, initialScaleFactor) {
+        photoAnchorSnapshot?.let { snapshot ->
+            ArAnchorPlacementResult(
+                latitude = snapshot.latitude,
+                longitude = snapshot.longitude,
+                targetAzimuthDegrees = normalizeHeading(snapshot.azimuthDegrees),
+                poiAzimuthDegrees = LocationAndOrientationTracker.calculateBearingDegrees(
+                    poiLatitude,
+                    poiLongitude,
+                    snapshot.latitude,
+                    snapshot.longitude
+                ).toFloat(),
+                distanceFromPoiMeters = LocationAndOrientationTracker.calculateDistanceMeters(
+                    poiLatitude,
+                    poiLongitude,
+                    snapshot.latitude,
+                    snapshot.longitude
+                ).toFloat(),
+                elevationMeters = snapshot.elevationMeters,
+                scaleFactor = initialScaleFactor.coerceIn(0.5f, 3f)
+            )
+        }
+    }
     var hasCameraPermission by remember(context) {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -171,12 +197,14 @@ fun ArAnchorPlacementDialog(
     var sessionError by remember { mutableStateOf<String?>(null) }
     var placementError by remember { mutableStateOf<String?>(null) }
     var isTracking by remember { mutableStateOf(false) }
-    var placement by remember { mutableStateOf<ArAnchorPlacementResult?>(null) }
+    var placement by remember(fixedPhotoPlacement) { mutableStateOf(fixedPhotoPlacement) }
     var placementPose by remember { mutableStateOf<Pose?>(null) }
     var appliedScale by remember { mutableFloatStateOf(Float.NaN) }
     var appliedElevation by remember { mutableFloatStateOf(Float.NaN) }
     var scaleFactor by remember { mutableFloatStateOf(initialScaleFactor.coerceIn(0.5f, 3f)) }
-    var elevationMeters by remember { mutableFloatStateOf(1.5f) }
+    var elevationMeters by remember(photoAnchorSnapshot) {
+        mutableFloatStateOf(photoAnchorSnapshot?.elevationMeters ?: 1.5f)
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasCameraPermission = granted }
@@ -186,6 +214,14 @@ fun ArAnchorPlacementDialog(
         childNodes.clear()
         appliedScale = Float.NaN
         appliedElevation = Float.NaN
+    }
+
+    fun updateScaleFactor(value: Float) {
+        val newScale = value.coerceIn(0.5f, 3f)
+        scaleFactor = newScale
+        if (fixedPhotoPlacement != null) {
+            placement = fixedPhotoPlacement.copy(scaleFactor = newScale)
+        }
     }
 
     fun installPreview(session: Session, pose: Pose, result: ArAnchorPlacementResult, scale: Float) {
@@ -236,7 +272,12 @@ fun ArAnchorPlacementDialog(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1)
                     Text(
-                        text = if (isEn) "Tap a surface to place • zoom to resize" else "Chạm mặt phẳng để đặt • phóng to/thu nhỏ",
+                        text = when {
+                            photoAnchorSnapshot != null && isEn -> "Anchored at the photo location • zoom to resize"
+                            photoAnchorSnapshot != null -> "Neo tại vị trí chụp • chỉ chỉnh kích thước"
+                            isEn -> "Tap a surface to place • zoom to resize"
+                            else -> "Chạm mặt phẳng để đặt • phóng to/thu nhỏ"
+                        },
                         color = BrandColors.Cream,
                         fontSize = 12.sp
                     )
@@ -253,12 +294,13 @@ fun ArAnchorPlacementDialog(
                         engine = engine,
                         materialLoader = materialLoader,
                         childNodes = childNodes,
-                        planeRenderer = true,
+                        planeRenderer = photoAnchorSnapshot == null,
                         onSessionFailed = { error ->
                             sessionError = error.localizedMessage ?: if (isEn) "Could not start AR camera." else "Không thể mở camera AR."
                         },
                         onSessionUpdated = sessionUpdated@{ session, frame ->
                             isTracking = frame.camera.trackingState == TrackingState.TRACKING
+                            if (photoAnchorSnapshot != null) return@sessionUpdated
                             val tap = pendingTap.getAndSet(null)
                             if (tap != null) {
                                 val floorHit = frame.hitTest(tap.x, tap.y).firstOrNull { hit ->
@@ -349,7 +391,9 @@ fun ArAnchorPlacementDialog(
                         },
                         onGestureListener = rememberOnGestureListener(
                             onSingleTapConfirmed = { event: MotionEvent, _ ->
-                                pendingTap.set(Offset(event.x, event.y))
+                                if (photoAnchorSnapshot == null) {
+                                    pendingTap.set(Offset(event.x, event.y))
+                                }
                             }
                         )
                     )
@@ -372,7 +416,7 @@ fun ArAnchorPlacementDialog(
                     }
                 }
 
-                // Viewfinder frame stays centered while the user taps the real surface to anchor it.
+                // Keep the photo preview centered while only its size is adjusted.
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
@@ -407,11 +451,18 @@ fun ArAnchorPlacementDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.TouchApp, contentDescription = null, tint = BrandColors.Cream, modifier = Modifier.size(17.dp))
+                        if (photoAnchorSnapshot == null) {
+                            Icon(Icons.Default.TouchApp, contentDescription = null, tint = BrandColors.Cream, modifier = Modifier.size(17.dp))
+                        }
                         Text(
                             text = when {
                                 sessionError != null -> sessionError!!
                                 placementError != null -> placementError!!
+                                photoAnchorSnapshot != null -> if (isEn) {
+                                    "Anchored to the location and direction where the photo was taken."
+                                } else {
+                                    "Ảnh sẽ neo tại đúng vị trí và hướng lúc chụp."
+                                }
                                 placement != null -> if (isEn) "Placed • ${placement!!.distanceFromPoiMeters.roundToInt()} m from POI" else "Đã đặt • cách POI ${placement!!.distanceFromPoiMeters.roundToInt()} m"
                                 !isTracking -> if (isEn) "Move the camera slowly to find a flat surface." else "Lia camera chậm để tìm mặt phẳng phù hợp."
                                 else -> if (isEn) "Tap the surface where this content should appear." else "Chạm lên vị trí muốn hiển thị nội dung."
@@ -440,38 +491,42 @@ fun ArAnchorPlacementDialog(
                             color = BrandColors.PrimaryDeep
                         )
                         OutlinedButton(
-                            onClick = { scaleFactor = (scaleFactor - 0.25f).coerceAtLeast(0.5f) },
+                            onClick = { updateScaleFactor(scaleFactor - 0.25f) },
                             enabled = scaleFactor > 0.5f
                         ) { Icon(Icons.Default.Remove, contentDescription = if (isEn) "Zoom out" else "Thu nhỏ") }
                         Spacer(Modifier.width(8.dp))
                         Button(
-                            onClick = { scaleFactor = (scaleFactor + 0.25f).coerceAtMost(3f) },
+                            onClick = { updateScaleFactor(scaleFactor + 0.25f) },
                             enabled = scaleFactor < 3f
                         ) { Icon(Icons.Default.Add, contentDescription = if (isEn) "Zoom in" else "Phóng to") }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (photoAnchorSnapshot == null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (isEn) "Height ${"%.1f".format(elevationMeters)} m" else "Độ cao ${"%.1f".format(elevationMeters)} m",
+                                modifier = Modifier.width(120.dp),
+                                fontWeight = FontWeight.Medium,
+                                color = BrandColors.PrimaryDeep,
+                                fontSize = 12.sp
+                            )
+                            Slider(
+                                value = elevationMeters,
+                                onValueChange = { value ->
+                                    elevationMeters = value
+                                    placement = placement?.copy(elevationMeters = value)
+                                },
+                                valueRange = 0.3f..5f,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    if (photoAnchorSnapshot == null) {
                         Text(
-                            text = if (isEn) "Height ${"%.1f".format(elevationMeters)} m" else "Độ cao ${"%.1f".format(elevationMeters)} m",
-                            modifier = Modifier.width(120.dp),
-                            fontWeight = FontWeight.Medium,
-                            color = BrandColors.PrimaryDeep,
-                            fontSize = 12.sp
-                        )
-                        Slider(
-                            value = elevationMeters,
-                            onValueChange = { value ->
-                                elevationMeters = value
-                                placement = placement?.copy(elevationMeters = value)
-                            },
-                            valueRange = 0.3f..5f,
-                            modifier = Modifier.weight(1f)
+                            text = if (isEn) "GPS ±${gpsAccuracyMeters.roundToInt()} m • heading ${currentAzimuthDegrees.roundToInt()}°" else "GPS ±${gpsAccuracyMeters.roundToInt()} m • hướng ${currentAzimuthDegrees.roundToInt()}°",
+                            color = BrandColors.MutedText,
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    Text(
-                        text = if (isEn) "GPS ±${gpsAccuracyMeters.roundToInt()} m • heading ${currentAzimuthDegrees.roundToInt()}°" else "GPS ±${gpsAccuracyMeters.roundToInt()} m • hướng ${currentAzimuthDegrees.roundToInt()}°",
-                        color = BrandColors.MutedText,
-                        style = MaterialTheme.typography.bodySmall
-                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
                             Text(if (isEn) "Cancel" else "Hủy")
@@ -479,10 +534,19 @@ fun ArAnchorPlacementDialog(
                         Button(
                             onClick = { placement?.let(onConfirm) },
                             modifier = Modifier.weight(1.4f),
-                            enabled = placement != null && placementError == null && isTracking &&
-                                hasFreshGpsFix && gpsAccuracyMeters <= MaxArPlacementGpsAccuracyMeters
+                            enabled = placement != null && placementError == null && (
+                                photoAnchorSnapshot != null || (isTracking && hasFreshGpsFix &&
+                                    gpsAccuracyMeters <= MaxArPlacementGpsAccuracyMeters)
+                                )
                         ) {
-                            Text(if (isEn) "Use this placement" else "Dùng vị trí này")
+                            Text(
+                                when {
+                                    photoAnchorSnapshot != null && isEn -> "Use photo location"
+                                    photoAnchorSnapshot != null -> "Dùng vị trí chụp"
+                                    isEn -> "Use this placement"
+                                    else -> "Dùng vị trí này"
+                                }
+                            )
                         }
                     }
                 }

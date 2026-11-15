@@ -439,7 +439,9 @@ data class CreateOrUpdatePoiRequest(
     @SerializedName(value = "localizations", alternate = ["translations"]) val translations: List<PoiTranslationInputDto>,
     @SerializedName("arInfoCards") val arInfoCards: List<ArInfoCardInputDto> = emptyList(),
     @SerializedName("saveAsDraft") val saveAsDraft: Boolean = false,
-    @SerializedName("address") val address: String? = null
+    @SerializedName("address") val address: String? = null,
+    @SerializedName("province") val province: String? = null,
+    @SerializedName("ward") val ward: String? = null
 )
 
 data class ApprovePoiRequest(
@@ -469,7 +471,9 @@ data class AdminPoiDto(
     @SerializedName("arInfoCardCount") val arInfoCardCount: Int = 0,
     @SerializedName("coverImageUrl") val coverImageUrl: String? = null,
     @SerializedName("localizations") val localizations: List<PoiTranslationInputDto> = emptyList(),
-    @SerializedName("address") val address: String? = null
+    @SerializedName("address") val address: String? = null,
+    @SerializedName("province") val province: String? = null,
+    @SerializedName("ward") val ward: String? = null
 ) {
     val parsedStatus: PoiStatus
         get() = PoiStatus.fromString(status)

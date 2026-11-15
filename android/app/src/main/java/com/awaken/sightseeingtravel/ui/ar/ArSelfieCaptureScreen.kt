@@ -517,6 +517,7 @@ fun ArSelfieCaptureScreen(
             previewBitmap = placementPreviewBitmap!!,
             previewWidthMeters = 0.82f,
             initialScaleFactor = anchorAtCapture.scaleFactor,
+            photoAnchorSnapshot = anchorAtCapture,
             selectedLanguage = selectedLanguage,
             onDismiss = {
                 showPlacementCamera = false

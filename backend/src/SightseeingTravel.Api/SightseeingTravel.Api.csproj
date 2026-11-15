@@ -28,6 +28,7 @@
     <EmbeddedResource Include="Migrations/0007_ArModelAssets.sql" />
     <EmbeddedResource Include="Migrations/0008_ArContentPlacementScale.sql" />
     <EmbeddedResource Include="Migrations/0009_PoiAddress.sql" />
+    <EmbeddedResource Include="Migrations/0010_PoiAdministrativeArea.sql" />
   </ItemGroup>
 
   <ItemGroup>

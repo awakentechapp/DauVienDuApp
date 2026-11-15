@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS attractions.points_of_interest (
     category VARCHAR(40) NOT NULL DEFAULT 'historical_site',
     latitude DOUBLE PRECISION NOT NULL,
     longitude DOUBLE PRECISION NOT NULL,
+    province VARCHAR(150) NULL,
+    ward VARCHAR(150) NULL,
     activation_radius_meters DOUBLE PRECISION NOT NULL DEFAULT 100.0,
     cover_image_url TEXT NULL,
     cover_object_key VARCHAR(500) NULL,
