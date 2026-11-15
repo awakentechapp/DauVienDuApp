@@ -208,7 +208,7 @@ internal object ApiResponseAdapters {
                 activationRadiusMeters = value.double("activationRadiusMeters", default = 50.0),
                 status = value.string("status", default = "Draft"),
                 rejectionReason = value.nullableString("rejectionReason"),
-                createdByAdminName = value.string("createdByAdminName", "createdBy", default = "Admin"),
+                createdByAdminName = value.string("createdByName", "createdByAdminName", default = "Admin"),
                 approvedBySuperAdminName = value.nullableString("approvedBySuperAdminName", "approvedBy"),
                 updatedAt = value.string("updatedAt", "createdAt"),
                 titleVi = vi?.title ?: fallback?.title.orEmpty(),

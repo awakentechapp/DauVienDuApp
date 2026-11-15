@@ -15,19 +15,22 @@ public sealed class AttractionService : IAttractionService
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IObjectStorageService _objectStorageService;
     private readonly ICommunityPhotoArQueryService _communityPhotoQueryService;
+    private readonly IUserDisplayNameResolver? _userDisplayNameResolver;
 
     public AttractionService(
         AttractionsDbContext dbContext,
         ICurrentUser currentUser,
         IDateTimeProvider dateTimeProvider,
         IObjectStorageService objectStorageService,
-        ICommunityPhotoArQueryService communityPhotoQueryService)
+        ICommunityPhotoArQueryService communityPhotoQueryService,
+        IUserDisplayNameResolver? userDisplayNameResolver = null)
     {
         _dbContext = dbContext;
         _currentUser = currentUser;
         _dateTimeProvider = dateTimeProvider;
         _objectStorageService = objectStorageService;
         _communityPhotoQueryService = communityPhotoQueryService;
+        _userDisplayNameResolver = userDisplayNameResolver;
     }
 
     public async Task<Result<NearbyPoisResponse>> GetNearbyPoisAsync(
@@ -217,6 +220,15 @@ public sealed class AttractionService : IAttractionService
             .ToListAsync(cancellationToken);
 
         var items = pois.Select(MapToAdminDto).ToList();
+        if (_userDisplayNameResolver is not null)
+        {
+            var creatorNames = await _userDisplayNameResolver.ResolveAsync(
+                items.Select(item => item.CreatedBy),
+                cancellationToken);
+            items = items.Select(item => creatorNames.TryGetValue(item.CreatedBy, out var displayName)
+                ? item with { CreatedByName = displayName }
+                : item).ToList();
+        }
         return Result.Success<IReadOnlyList<AdminPoiDto>>(items);
     }
 
@@ -288,7 +300,7 @@ public sealed class AttractionService : IAttractionService
         _dbContext.PointsOfInterest.Add(poi);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return Result.Success(MapToAdminDto(poi));
+        return Result.Success(await MapToAdminDtoWithCreatorNameAsync(poi, cancellationToken));
     }
 
     public async Task<Result<AdminPoiDto>> UpdatePoiAsync(
@@ -377,7 +389,7 @@ public sealed class AttractionService : IAttractionService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapToAdminDto(poi));
+        return Result.Success(await MapToAdminDtoWithCreatorNameAsync(poi, cancellationToken));
     }
 
     public async Task<Result<AdminPoiDto>> UploadCoverImageAsync(
@@ -458,7 +470,7 @@ public sealed class AttractionService : IAttractionService
             }
         }
 
-        return Result.Success(MapToAdminDto(poi));
+        return Result.Success(await MapToAdminDtoWithCreatorNameAsync(poi, cancellationToken));
     }
 
     public async Task<Result<AdminPoiDto>> SubmitPoiForApprovalAsync(
@@ -484,7 +496,7 @@ public sealed class AttractionService : IAttractionService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapToAdminDto(poi));
+        return Result.Success(await MapToAdminDtoWithCreatorNameAsync(poi, cancellationToken));
     }
 
     public async Task<Result<AdminPoiDto>> ApprovePoiAsync(
@@ -518,7 +530,7 @@ public sealed class AttractionService : IAttractionService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapToAdminDto(poi));
+        return Result.Success(await MapToAdminDtoWithCreatorNameAsync(poi, cancellationToken));
     }
 
     public async Task<Result<AdminPoiDto>> RejectPoiAsync(
@@ -553,7 +565,7 @@ public sealed class AttractionService : IAttractionService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return Result.Success(MapToAdminDto(poi));
+        return Result.Success(await MapToAdminDtoWithCreatorNameAsync(poi, cancellationToken));
     }
 
     public async Task<Result> DeletePoiAsync(
@@ -637,6 +649,24 @@ public sealed class AttractionService : IAttractionService
         string.IsNullOrWhiteSpace(poi.CoverObjectKey)
             ? poi.CoverImageUrl
             : _objectStorageService.CreateReadUrl(poi.CoverObjectKey);
+
+    private async Task<AdminPoiDto> MapToAdminDtoWithCreatorNameAsync(
+        PointOfInterest poi,
+        CancellationToken cancellationToken)
+    {
+        var dto = MapToAdminDto(poi);
+        if (_userDisplayNameResolver is null)
+        {
+            return dto;
+        }
+
+        var creatorNames = await _userDisplayNameResolver.ResolveAsync(
+            new[] { dto.CreatedBy },
+            cancellationToken);
+        return creatorNames.TryGetValue(dto.CreatedBy, out var displayName)
+            ? dto with { CreatedByName = displayName }
+            : dto;
+    }
 
     private AdminPoiDto MapToAdminDto(PointOfInterest poi)
     {

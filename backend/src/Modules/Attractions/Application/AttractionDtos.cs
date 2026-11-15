@@ -88,4 +88,5 @@ public sealed record AdminPoiDto(
     IReadOnlyList<PoiLocalizationInputDto> Localizations,
     string? Address = null,
     string? Province = null,
-    string? Ward = null);
+    string? Ward = null,
+    string? CreatedByName = null);

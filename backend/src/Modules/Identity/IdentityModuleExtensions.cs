@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SightseeingTravel.Modules.Identity.Application;
 using SightseeingTravel.Modules.Identity.Infrastructure;
 using SightseeingTravel.Modules.Identity.Presentation;
+using SightseeingTravel.SharedKernel.Contracts;
 
 namespace SightseeingTravel.Modules.Identity;
 
@@ -31,6 +32,7 @@ public static class IdentityModuleExtensions
         services.AddSingleton<JwtTokenGenerator>();
         services.AddSingleton<IPasswordResetEmailSender, SmtpPasswordResetEmailSender>();
         services.AddScoped<IIdentityService, IdentityService>();
+        services.AddScoped<IUserDisplayNameResolver, IdentityUserDisplayNameResolver>();
 
         return services;
     }

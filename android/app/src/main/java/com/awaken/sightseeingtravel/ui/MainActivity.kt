@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -30,11 +31,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -1569,17 +1574,14 @@ private fun ExploreMapTabContent(
     viewModel: SightseeingAppViewModel
 ) {
     val isEn = uiState.selectedLanguage.equals("en", ignoreCase = true)
-    var searchQuery by remember { mutableStateOf("") }
-    val visiblePois = uiState.nearbyPois.filter { poi ->
-        searchQuery.isBlank() || poi.title.contains(searchQuery, ignoreCase = true) ||
-            PoiCategoryLabels.label(poi.category, uiState.selectedLanguage).contains(searchQuery, ignoreCase = true)
-    }
+    var mapBearingDegrees by remember { mutableFloatStateOf(0f) }
+    var compassResetTrigger by remember { mutableIntStateOf(0) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // 1. MapLibre + OpenFreeMap/Bright Vector Tile Map View
         OpenFreeMapComposeView(
             spatialPose = spatialPose,
-            pois = visiblePois,
+            pois = uiState.nearbyPois,
             selectedPoiId = focusedPoiId ?: uiState.selectedPoiDetail?.id,
             recenterTrigger = recenterTrigger,
             focusedPoiId = focusedPoiId,
@@ -1587,6 +1589,8 @@ private fun ExploreMapTabContent(
             navigationRoute = uiState.activeNavigationRoute,
             navigationTravelMode = uiState.navigationTravelMode,
             isNavigationActive = uiState.navigationTarget != null,
+            compassResetTrigger = compassResetTrigger,
+            onCameraBearingChanged = { mapBearingDegrees = it },
             navigationSessionKey = uiState.navigationTarget?.let {
                 "${it.poiId}:${uiState.navigationTravelMode.apiValue}"
             },
@@ -1596,7 +1600,7 @@ private fun ExploreMapTabContent(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Map-first search and language controls.
+        // 2. Nearby places and language controls.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1623,7 +1627,7 @@ private fun ExploreMapTabContent(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Dấu Viễn Du", color = BrandColors.Primary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                if (isEn) "${visiblePois.size} nearby places" else "${visiblePois.size} địa điểm quanh bạn",
+                                if (isEn) "${uiState.nearbyPois.size} nearby places" else "${uiState.nearbyPois.size} địa điểm quanh bạn",
                                 color = BrandColors.MutedText,
                                 fontSize = 11.sp
                             )
@@ -1636,29 +1640,47 @@ private fun ExploreMapTabContent(
                         }
                     }
 
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = { Text(if (isEn) "Search places in this area" else "Tìm địa điểm trong khu vực") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = BrandColors.Primary) },
-                        trailingIcon = if (searchQuery.isNotEmpty()) {
-                            {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = if (isEn) "Clear search" else "Xóa tìm kiếm")
+                    if (uiState.nearbyPois.isEmpty()) {
+                        Text(
+                            if (isEn) "No nearby places" else "Chưa có địa điểm gần đây",
+                            color = BrandColors.MutedText,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(uiState.nearbyPois, key = { it.id }) { poi ->
+                                val chipShape = RoundedCornerShape(16.dp)
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(chipShape)
+                                        .clickable { onSelectPoi(poi) },
+                                    shape = chipShape,
+                                    color = BrandColors.Cream
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.LocationOn,
+                                            contentDescription = null,
+                                            tint = BrandColors.Primary,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            poi.title,
+                                            color = BrandColors.PrimaryDeep,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
-                        } else null,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = BrandColors.Primary,
-                            unfocusedBorderColor = BrandColors.Border,
-                            focusedContainerColor = BrandColors.Surface,
-                            unfocusedContainerColor = BrandColors.Surface,
-                            cursorColor = BrandColors.Primary
-                        )
-                    )
+                        }
+                    }
                 }
             }
 
@@ -1697,6 +1719,55 @@ private fun ExploreMapTabContent(
 
         }
 
+        val gpsButtonBottomPadding = when {
+            uiState.navigationTarget != null -> 300.dp
+            uiState.selectedPoiDetail != null -> 340.dp
+            else -> 20.dp
+        }
+        val normalizedMapBearing = ((mapBearingDegrees % 360f) + 360f) % 360f
+        val deviationFromNorth = minOf(normalizedMapBearing, 360f - normalizedMapBearing)
+
+        if (deviationFromNorth > 1.5f) {
+            FloatingActionButton(
+                onClick = { compassResetTrigger++ },
+                containerColor = Color.White,
+                contentColor = BrandColors.PrimaryDeep,
+                shape = CircleShape,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 20.dp, bottom = gpsButtonBottomPadding + 64.dp)
+                    .size(48.dp)
+                    .semantics {
+                        contentDescription = if (isEn) "Reset map orientation to north" else "Đưa bản đồ về hướng Bắc"
+                    }
+            ) {
+                Canvas(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .rotate(-normalizedMapBearing)
+                ) {
+                    val centerX = size.width / 2f
+                    val centerY = size.height / 2f
+                    val northNeedle = Path().apply {
+                        moveTo(centerX, size.height * 0.06f)
+                        lineTo(size.width * 0.82f, centerY)
+                        lineTo(centerX, size.height * 0.55f)
+                        lineTo(size.width * 0.18f, centerY)
+                        close()
+                    }
+                    val southNeedle = Path().apply {
+                        moveTo(centerX, size.height * 0.94f)
+                        lineTo(size.width * 0.82f, centerY)
+                        lineTo(centerX, size.height * 0.45f)
+                        lineTo(size.width * 0.18f, centerY)
+                        close()
+                    }
+                    drawPath(northNeedle, color = Color(0xFFD93025))
+                    drawPath(southNeedle, color = Color(0xFF5F6368))
+                }
+            }
+        }
+
         // 3. Recenter GPS FAB
         FloatingActionButton(
             onClick = {
@@ -1708,11 +1779,7 @@ private fun ExploreMapTabContent(
                 .align(Alignment.BottomEnd)
                 .padding(
                     end = 16.dp,
-                    bottom = when {
-                        uiState.navigationTarget != null -> 300.dp
-                        uiState.selectedPoiDetail != null -> 340.dp
-                        else -> 20.dp
-                    }
+                    bottom = gpsButtonBottomPadding
                 )
         ) {
             Icon(

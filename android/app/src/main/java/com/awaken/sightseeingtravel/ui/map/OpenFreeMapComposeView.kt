@@ -4,9 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.Bundle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -65,6 +67,8 @@ fun OpenFreeMapComposeView(
     navigationTravelMode: NavigationTravelMode,
     isNavigationActive: Boolean,
     navigationSessionKey: String?,
+    compassResetTrigger: Int,
+    onCameraBearingChanged: (Float) -> Unit,
     onPoiMarkerClick: (PoiPinSummaryDto) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -95,6 +99,7 @@ fun OpenFreeMapComposeView(
     val currentIsNavigationActive by rememberUpdatedState(isNavigationActive)
     val currentSelectedPoiId by rememberUpdatedState(selectedPoiId)
     val currentSpatialPose by rememberUpdatedState(spatialPose)
+    val currentOnCameraBearingChanged by rememberUpdatedState(onCameraBearingChanged)
     val currentOnPoiClick by rememberUpdatedState(onPoiMarkerClick)
     val density = context.resources.displayMetrics.density
     var fittedNavigationSession by remember { mutableStateOf<String?>(null) }
@@ -140,6 +145,24 @@ fun OpenFreeMapComposeView(
                     .build()
             ),
             900
+        )
+    }
+
+    LaunchedEffect(compassResetTrigger, mapLibreInstance, isStyleReady) {
+        if (compassResetTrigger <= 0 || !isStyleReady) return@LaunchedEffect
+        val map = mapLibreInstance ?: return@LaunchedEffect
+        val cameraPosition = map.cameraPosition
+        val target = cameraPosition.target ?: return@LaunchedEffect
+        map.animateCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(target)
+                    .zoom(cameraPosition.zoom)
+                    .tilt(cameraPosition.tilt)
+                    .bearing(0.0)
+                    .build()
+            ),
+            450
         )
     }
 
@@ -304,7 +327,7 @@ fun OpenFreeMapComposeView(
 
                     getMapAsync { map ->
                         mapLibreInstance = map
-                        map.uiSettings.isCompassEnabled = true
+                        map.uiSettings.isCompassEnabled = false
                         map.uiSettings.isScrollGesturesEnabled = true
                         map.uiSettings.isZoomGesturesEnabled = true
                         map.uiSettings.isRotateGesturesEnabled = true
@@ -317,6 +340,14 @@ fun OpenFreeMapComposeView(
                                 isFollowingNavigation = false
                             }
                         }
+
+                        map.addOnCameraIdleListener {
+                            val bearing = ((map.cameraPosition.bearing % 360.0 + 360.0) % 360.0).toFloat()
+                            currentOnCameraBearingChanged(bearing)
+                        }
+                        currentOnCameraBearingChanged(
+                            ((map.cameraPosition.bearing % 360.0 + 360.0) % 360.0).toFloat()
+                        )
 
                         loadDauVienDuBrandStyle(
                             context = context,
@@ -649,140 +680,330 @@ private fun updateGeoJsonLayers(
 }
 
 private fun createUserGpsDotBitmap(density: Float): Bitmap {
-    val sizePx = (28 * density).toInt().coerceAtLeast(28)
+    val sizePx = (52 * density).toInt().coerceAtLeast(52)
     val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val center = sizePx / 2f
+
+    // The map symbol rotates this north-facing cone using the live GPS/compass course.
+    val directionBeam = Path().apply {
+        moveTo(center, center)
+        lineTo(center - 15f * density, 2f * density)
+        lineTo(center + 15f * density, 2f * density)
+        close()
+    }
+    val beamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(64, 66, 133, 244)
+        style = Paint.Style.FILL
+    }
+    canvas.drawPath(directionBeam, beamPaint)
 
     val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(72, 66, 133, 244)
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(center, center, center, haloPaint)
+    canvas.drawCircle(center, center, 12f * density, haloPaint)
 
     val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(center, center, center * 0.62f, borderPaint)
+    canvas.drawCircle(center, center, 9f * density, borderPaint)
 
     val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#4285F4")
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(center, center, center * 0.46f, dotPaint)
+    canvas.drawCircle(center, center, 6.5f * density, dotPaint)
 
     return bitmap
 }
 
 private fun createNavigationMarkerBitmap(density: Float, mode: NavigationTravelMode): Bitmap {
-    val sizePx = (50 * density).toInt().coerceAtLeast(50)
+    val sizePx = (58 * density).toInt().coerceAtLeast(58)
     val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val center = sizePx / 2f
-    val navigationBlue = Color.parseColor("#4285F4")
-    val navigationGlyphAccent = Color.parseColor("#1A56B5")
+    val unit = density
+    val badgeRadius = center * 0.82f
 
     canvas.drawCircle(
         center,
-        center,
-        center * 0.96f,
+        center + 1.2f * unit,
+        badgeRadius,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(58, 66, 133, 244)
-            style = Paint.Style.FILL
+            color = Color.argb(150, 12, 35, 72)
+            setShadowLayer(4f * unit, 0f, 2f * unit, Color.argb(110, 0, 0, 0))
         }
     )
     canvas.drawCircle(
         center,
         center,
-        center * 0.87f,
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
-        }
+        badgeRadius * 0.96f,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     )
     canvas.drawCircle(
         center,
         center,
-        center * 0.74f,
+        badgeRadius * 0.86f,
+        gradientPaint(
+            topColor = Color.parseColor("#72C3FF"),
+            bottomColor = Color.parseColor("#1764D1"),
+            topY = center - badgeRadius,
+            bottomY = center + badgeRadius
+        )
+    )
+    canvas.drawOval(
+        RectF(
+            center - badgeRadius * 0.55f,
+            center - badgeRadius * 0.70f,
+            center + badgeRadius * 0.55f,
+            center - badgeRadius * 0.43f
+        ),
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(52, 255, 255, 255) }
+    )
+    canvas.drawCircle(
+        center,
+        center,
+        badgeRadius * 0.84f,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = navigationBlue
-            style = Paint.Style.FILL
+            color = Color.argb(105, 255, 255, 255)
+            style = Paint.Style.STROKE
+            strokeWidth = 0.8f * unit
         }
     )
-
-    val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = sizePx * 0.065f
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
-    val fillGlyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.FILL
-    }
-    val path = Path()
 
     when (mode) {
-        NavigationTravelMode.WALKING -> {
-            canvas.drawCircle(center, center * 0.46f, center * 0.105f, fillGlyph)
-            canvas.drawLine(center, center * 0.59f, center, center * 1.05f, glyph)
-            canvas.drawLine(center, center * 0.72f, center * 0.72f, center * 0.91f, glyph)
-            canvas.drawLine(center, center * 0.72f, center * 1.28f, center * 0.91f, glyph)
-            canvas.drawLine(center, center * 1.03f, center * 0.77f, center * 1.35f, glyph)
-            canvas.drawLine(center, center * 1.03f, center * 1.23f, center * 1.35f, glyph)
-        }
-
-        NavigationTravelMode.CAR -> {
-            val body = RectF(center * 0.58f, center * 0.39f, center * 1.42f, center * 1.58f)
-            canvas.drawRoundRect(body, center * 0.20f, center * 0.20f, fillGlyph)
-            canvas.drawRoundRect(
-                RectF(center * 0.72f, center * 0.61f, center * 1.28f, center * 0.91f),
-                center * 0.08f,
-                center * 0.08f,
-                Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = navigationGlyphAccent
-                    style = Paint.Style.FILL
-                }
-            )
-            canvas.drawRoundRect(
-                RectF(center * 0.75f, center * 1.04f, center * 1.25f, center * 1.34f),
-                center * 0.06f,
-                center * 0.06f,
-                Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = navigationGlyphAccent
-                    style = Paint.Style.FILL
-                }
-            )
-        }
-
-        NavigationTravelMode.MOTORCYCLE -> {
-            val wheelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                style = Paint.Style.STROKE
-                strokeWidth = sizePx * 0.055f
-            }
-            canvas.drawCircle(center, center * 0.48f, center * 0.12f, wheelPaint)
-            canvas.drawCircle(center, center * 1.48f, center * 0.12f, wheelPaint)
-            path.moveTo(center, center * 0.48f)
-            path.lineTo(center * 0.72f, center * 0.93f)
-            path.lineTo(center, center * 1.21f)
-            path.lineTo(center * 1.28f, center * 0.77f)
-            path.lineTo(center * 1.48f, center * 1.48f)
-            path.moveTo(center * 0.72f, center * 0.93f)
-            path.lineTo(center * 0.5f, center * 1.40f)
-            canvas.drawPath(path, glyph)
-            canvas.drawRoundRect(
-                RectF(center * 0.82f, center * 0.68f, center * 1.18f, center * 0.86f),
-                center * 0.08f,
-                center * 0.08f,
-                fillGlyph
-            )
-        }
+        NavigationTravelMode.WALKING -> drawRaisedWalker(canvas, center, unit)
+        NavigationTravelMode.CAR -> drawRaisedCar(canvas, center, unit)
+        NavigationTravelMode.MOTORCYCLE -> drawRaisedMotorcycle(canvas, center, unit)
     }
 
     return bitmap
+}
+
+private fun gradientPaint(topColor: Int, bottomColor: Int, topY: Float, bottomY: Float): Paint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        shader = LinearGradient(0f, topY, 0f, bottomY, topColor, bottomColor, Shader.TileMode.CLAMP)
+    }
+
+private fun raisedStroke(color: Int, width: Float): Paint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        style = Paint.Style.STROKE
+        strokeWidth = width
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
+private fun drawRaisedWalker(canvas: Canvas, center: Float, unit: Float) {
+    val dark = Color.parseColor("#153B70")
+    val jacket = gradientPaint(
+        Color.parseColor("#FFFFFF"),
+        Color.parseColor("#9ED0FF"),
+        center - 7f * unit,
+        center + 6f * unit
+    )
+    val limbs = Path().apply {
+        moveTo(center - 2.7f * unit, center - 4f * unit)
+        lineTo(center - 6.8f * unit, center + 0.5f * unit)
+        lineTo(center - 5.2f * unit, center + 3.0f * unit)
+        moveTo(center + 2.7f * unit, center - 4f * unit)
+        lineTo(center + 6.8f * unit, center - 0.2f * unit)
+        lineTo(center + 5.5f * unit, center + 2.8f * unit)
+        moveTo(center - 2f * unit, center + 5f * unit)
+        lineTo(center - 5f * unit, center + 10f * unit)
+        lineTo(center - 6.5f * unit, center + 14f * unit)
+        moveTo(center + 2f * unit, center + 5f * unit)
+        lineTo(center + 5f * unit, center + 9f * unit)
+        lineTo(center + 3f * unit, center + 14f * unit)
+    }
+    canvas.save()
+    canvas.translate(0f, 1.3f * unit)
+    canvas.drawPath(limbs, raisedStroke(dark, 4.5f * unit))
+    canvas.restore()
+    canvas.drawPath(limbs, raisedStroke(Color.parseColor("#F6FBFF"), 3.0f * unit))
+    canvas.drawPath(limbs, raisedStroke(Color.parseColor("#9BCBFA"), 0.8f * unit))
+
+    val torso = Path().apply {
+        moveTo(center - 3f * unit, center - 7f * unit)
+        quadTo(center, center - 9f * unit, center + 3f * unit, center - 7f * unit)
+        lineTo(center + 3.8f * unit, center + 4.5f * unit)
+        quadTo(center, center + 7f * unit, center - 3.8f * unit, center + 4.5f * unit)
+        close()
+    }
+    canvas.save()
+    canvas.translate(0f, 1.5f * unit)
+    canvas.drawPath(torso, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = dark })
+    canvas.restore()
+    canvas.drawPath(torso, jacket)
+    canvas.drawLine(
+        center - 1.2f * unit,
+        center - 5f * unit,
+        center - 1.8f * unit,
+        center + 2.5f * unit,
+        raisedStroke(Color.argb(170, 255, 255, 255), 0.9f * unit)
+    )
+
+    canvas.drawCircle(center, center - 11.5f * unit, 3.4f * unit, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = dark })
+    canvas.drawCircle(
+        center - 0.5f * unit,
+        center - 12f * unit,
+        3.0f * unit,
+        gradientPaint(Color.parseColor("#FFE3BF"), Color.parseColor("#E9A879"), center - 15f * unit, center - 8f * unit)
+    )
+    canvas.drawCircle(
+        center - 1.4f * unit,
+        center - 13f * unit,
+        0.75f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(160, 255, 255, 255) }
+    )
+}
+
+private fun drawRaisedCar(canvas: Canvas, center: Float, unit: Float) {
+    val tirePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#17283A") }
+    val tireHighlight = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#8091A3") }
+    listOf(-9f, 7f).forEach { y ->
+        canvas.drawRoundRect(
+            RectF(center - 10.5f * unit, center + y * unit, center - 6.5f * unit, center + (y + 6f) * unit),
+            1.5f * unit,
+            1.5f * unit,
+            tirePaint
+        )
+        canvas.drawRoundRect(
+            RectF(center + 6.5f * unit, center + y * unit, center + 10.5f * unit, center + (y + 6f) * unit),
+            1.5f * unit,
+            1.5f * unit,
+            tirePaint
+        )
+        canvas.drawLine(center - 9.8f * unit, center + (y + 1.2f) * unit, center - 7.2f * unit, center + (y + 1.2f) * unit, tireHighlight)
+        canvas.drawLine(center + 7.2f * unit, center + (y + 1.2f) * unit, center + 9.8f * unit, center + (y + 1.2f) * unit, tireHighlight)
+    }
+
+    val body = Path().apply {
+        moveTo(center - 5f * unit, center + 15f * unit)
+        quadTo(center - 8f * unit, center + 14f * unit, center - 8f * unit, center + 9f * unit)
+        lineTo(center - 7.4f * unit, center - 9f * unit)
+        quadTo(center - 6.8f * unit, center - 15f * unit, center, center - 16f * unit)
+        quadTo(center + 6.8f * unit, center - 15f * unit, center + 7.4f * unit, center - 9f * unit)
+        lineTo(center + 8f * unit, center + 9f * unit)
+        quadTo(center + 8f * unit, center + 14f * unit, center + 5f * unit, center + 15f * unit)
+        close()
+    }
+    canvas.save()
+    canvas.translate(0f, 1.8f * unit)
+    canvas.drawPath(body, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#12355D") })
+    canvas.restore()
+    canvas.drawPath(
+        body,
+        gradientPaint(Color.parseColor("#FFFFFF"), Color.parseColor("#8EC8FF"), center - 16f * unit, center + 15f * unit)
+    )
+    canvas.drawPath(body, raisedStroke(Color.parseColor("#5A9DE0"), 0.8f * unit))
+
+    val frontGlass = Path().apply {
+        moveTo(center - 5.5f * unit, center - 8f * unit)
+        quadTo(center - 4.8f * unit, center - 13f * unit, center, center - 13f * unit)
+        quadTo(center + 4.8f * unit, center - 13f * unit, center + 5.5f * unit, center - 8f * unit)
+        lineTo(center + 4.7f * unit, center - 2f * unit)
+        lineTo(center - 4.7f * unit, center - 2f * unit)
+        close()
+    }
+    canvas.drawPath(frontGlass, gradientPaint(Color.parseColor("#315A78"), Color.parseColor("#142E45"), center - 13f * unit, center - 2f * unit))
+    canvas.drawLine(center - 3.6f * unit, center - 10.5f * unit, center + 3.2f * unit, center - 10.5f * unit, raisedStroke(Color.argb(170, 210, 242, 255), 0.75f * unit))
+
+    val rearGlass = Path().apply {
+        moveTo(center - 4.8f * unit, center + 3f * unit)
+        lineTo(center + 4.8f * unit, center + 3f * unit)
+        lineTo(center + 4.3f * unit, center + 8f * unit)
+        quadTo(center, center + 10.2f * unit, center - 4.3f * unit, center + 8f * unit)
+        close()
+    }
+    canvas.drawPath(rearGlass, gradientPaint(Color.parseColor("#264B69"), Color.parseColor("#142E45"), center + 3f * unit, center + 9f * unit))
+    canvas.drawRoundRect(
+        RectF(center - 5.4f * unit, center - 13.8f * unit, center - 3.1f * unit, center - 12.6f * unit),
+        0.7f * unit,
+        0.7f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FFF6C7") }
+    )
+    canvas.drawRoundRect(
+        RectF(center + 3.1f * unit, center - 13.8f * unit, center + 5.4f * unit, center - 12.6f * unit),
+        0.7f * unit,
+        0.7f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FFF6C7") }
+    )
+    canvas.drawRoundRect(
+        RectF(center - 5.3f * unit, center + 12.4f * unit, center - 2.6f * unit, center + 14f * unit),
+        0.6f * unit,
+        0.6f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#F16658") }
+    )
+    canvas.drawRoundRect(
+        RectF(center + 2.6f * unit, center + 12.4f * unit, center + 5.3f * unit, center + 14f * unit),
+        0.6f * unit,
+        0.6f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#F16658") }
+    )
+}
+
+private fun drawRaisedMotorcycle(canvas: Canvas, center: Float, unit: Float) {
+    val tire = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#142638") }
+    val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#C9D8E4") }
+    listOf(-13f, 13f).forEach { y ->
+        canvas.drawCircle(center, center + y * unit, 3.6f * unit, tire)
+        canvas.drawCircle(center, center + y * unit, 1.45f * unit, rim)
+    }
+
+    val frame = Path().apply {
+        moveTo(center, center - 12f * unit)
+        lineTo(center - 4f * unit, center - 4f * unit)
+        lineTo(center + 4f * unit, center + 4f * unit)
+        lineTo(center, center + 12f * unit)
+        moveTo(center - 4f * unit, center - 4f * unit)
+        lineTo(center + 5f * unit, center - 7f * unit)
+        lineTo(center + 1f * unit, center + 1f * unit)
+        lineTo(center - 4f * unit, center + 7f * unit)
+    }
+    canvas.drawPath(frame, raisedStroke(Color.parseColor("#163C65"), 3.4f * unit))
+    canvas.drawPath(frame, raisedStroke(Color.parseColor("#B7DFFF"), 1.5f * unit))
+    canvas.drawLine(center - 6f * unit, center - 11f * unit, center + 6f * unit, center - 11f * unit, raisedStroke(Color.parseColor("#EFF8FF"), 1.6f * unit))
+
+    val tank = Path().apply {
+        moveTo(center - 4.6f * unit, center - 6f * unit)
+        quadTo(center, center - 9f * unit, center + 4.8f * unit, center - 5f * unit)
+        lineTo(center + 3.1f * unit, center + 1f * unit)
+        quadTo(center, center + 3.4f * unit, center - 3.5f * unit, center + 1f * unit)
+        close()
+    }
+    canvas.save()
+    canvas.translate(0f, 1.3f * unit)
+    canvas.drawPath(tank, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#6A2630") })
+    canvas.restore()
+    canvas.drawPath(tank, gradientPaint(Color.parseColor("#FFB05F"), Color.parseColor("#D84B3F"), center - 8f * unit, center + 3f * unit))
+    canvas.drawLine(center - 1.8f * unit, center - 6f * unit, center - 0.8f * unit, center - 1f * unit, raisedStroke(Color.argb(190, 255, 238, 205), 0.8f * unit))
+
+    canvas.drawRoundRect(
+        RectF(center - 2.6f * unit, center + 2f * unit, center + 2.7f * unit, center + 8f * unit),
+        1.7f * unit,
+        1.7f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#253B50") }
+    )
+    canvas.drawCircle(
+        center,
+        center - 12f * unit,
+        2.2f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FFF4C7") }
+    )
+    canvas.drawCircle(
+        center,
+        center - 12f * unit,
+        3.3f * unit,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(135, 255, 240, 185)
+            style = Paint.Style.STROKE
+            strokeWidth = 0.8f * unit
+        }
+    )
 }
 
 private fun createPoiPinBitmap(

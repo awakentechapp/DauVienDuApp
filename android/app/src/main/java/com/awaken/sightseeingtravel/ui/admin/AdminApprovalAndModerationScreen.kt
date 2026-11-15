@@ -512,37 +512,6 @@ private fun PoiApprovalWorkflowTab(
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        // Role explanation banner
-        Surface(
-            color = if (isSuperAdmin) BrandColors.Cream.copy(alpha = 0.62f) else BrandColors.Sand,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = if (isSuperAdmin) Icons.Default.VerifiedUser else Icons.Default.Info,
-                    contentDescription = null,
-                    tint = if (isSuperAdmin) BrandColors.Primary else BrandColors.Terracotta
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = if (isSuperAdmin) {
-                        "SuperAdmin Mode: You can Approve (Publish to Map) or Reject POIs submitted by Admins."
-                    } else {
-                        "Admin Mode: New or edited POIs enter 'PendingApproval' and require SuperAdmin approval before appearing on the Tourist Map."
-                    },
-                    color = BrandColors.PrimaryDeep,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
         // Filter chips
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -703,7 +672,7 @@ private fun PoiApprovalWorkflowTab(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "GPS: ${"%.5f".format(poi.latitude)}, ${"%.5f".format(poi.longitude)} • Submitted by ${poi.createdByAdminName}",
+                            text = "GPS: ${"%.5f".format(poi.latitude)}, ${"%.5f".format(poi.longitude)} • ${if (isEn) "Submitted by" else "Người gửi"} ${poi.createdByAdminName}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
