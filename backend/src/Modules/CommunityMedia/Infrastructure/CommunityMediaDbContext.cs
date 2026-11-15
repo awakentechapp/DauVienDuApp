@@ -38,6 +38,8 @@ public sealed class CommunityMediaDbContext : DbContext
             builder.Property(x => x.DistanceFromPoiMeters).IsRequired();
             builder.Property(x => x.AzimuthDegrees);
             builder.Property(x => x.PitchDegrees);
+            builder.Property(x => x.ElevationMeters).HasDefaultValue(1.5).IsRequired();
+            builder.Property(x => x.ScaleFactor).HasDefaultValue(1.0).IsRequired();
             builder.Property(x => x.LikeCount).IsRequired();
             builder.Property(x => x.ReportCount).IsRequired();
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();

@@ -210,7 +210,7 @@ fun ArCameraScreen(
         val spatialNode = target.modelInstance?.let { modelInstance ->
             ModelNode(
                 modelInstance = modelInstance,
-                scaleToUnits = 1.2f,
+                scaleToUnits = 1.2f * target.scaleFactor,
                 centerOrigin = Position(y = -0.5f)
             ).apply {
                 name = target.id
@@ -223,12 +223,13 @@ fun ArCameraScreen(
                 isTouchable = true
             }
         } ?: target.bitmap?.let { bitmap ->
-            val height = (target.widthMeters * bitmap.height / bitmap.width)
-                .coerceIn(0.28f, 0.95f)
+            val scaledWidth = target.widthMeters * target.scaleFactor
+            val height = (scaledWidth * bitmap.height / bitmap.width)
+                .coerceIn(0.15f, 3f)
             ImageNode(
                 materialLoader = materialLoader,
                 bitmap = bitmap,
-                size = Size(target.widthMeters, height)
+                size = Size(scaledWidth, height)
             ).apply {
                 name = target.id
                 isTouchable = true
@@ -304,13 +305,15 @@ fun ArCameraScreen(
                                         bitmap = null,
                                         modelInstance = modelInstance,
                                         label = card.title,
-                                        modelRotationDegrees = card.modelRotationDegrees
+                                        modelRotationDegrees = card.modelRotationDegrees,
+                                        scaleFactor = card.scaleFactor
                                     )
                                 } else {
                                     SpatialArImageTarget(
                                         "card:${card.id}", latitude, longitude, card.elevationMeters,
                                         0.88f,
-                                        bitmap = spatialCardBitmaps[card.id]
+                                        bitmap = spatialCardBitmaps[card.id],
+                                        scaleFactor = card.scaleFactor
                                     )
                                 }
                                 addSpatialTarget(session, cameraPose, target)
@@ -340,7 +343,8 @@ fun ArCameraScreen(
                                     cameraPose,
                                     SpatialArImageTarget(
                                         "photo:${photo.id}", latitude, longitude,
-                                        photo.elevationMeters, 0.82f, bitmap
+                                        photo.elevationMeters, 0.82f, bitmap,
+                                        scaleFactor = photo.scaleFactor
                                     )
                                 )
                                 installedPhotoTargetIds.add(photo.id)
@@ -863,7 +867,8 @@ private data class SpatialArImageTarget(
     val bitmap: Bitmap?,
     val modelInstance: ModelInstance? = null,
     val label: String? = null,
-    val modelRotationDegrees: Float = 0f
+    val modelRotationDegrees: Float = 0f,
+    val scaleFactor: Float = 1f
 )
 
 private fun createSpatialModelLabelBitmap(label: String): Bitmap {

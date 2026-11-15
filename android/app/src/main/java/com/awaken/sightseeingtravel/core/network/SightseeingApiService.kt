@@ -107,6 +107,8 @@ interface SightseeingApiService {
         @Part("capturedLongitude") capturedLongitude: RequestBody,
         @Part("azimuthDegrees") azimuthDegrees: RequestBody,
         @Part("pitchDegrees") pitchDegrees: RequestBody,
+        @Part("elevationMeters") elevationMeters: RequestBody,
+        @Part("scaleFactor") scaleFactor: RequestBody,
         @Part("caption") caption: RequestBody
     ): ApiEnvelope<CommunityPhotoDto>
 
@@ -408,6 +410,8 @@ object SightseeingNetworkModule {
         capturedLongitude: Double,
         azimuthDegrees: Float,
         pitchDegrees: Float,
+        elevationMeters: Float,
+        scaleFactor: Float,
         caption: String
     ): PhotoMultipartPayload {
         val compressedBytes = compressJpegAround300Kb(photoFile)
@@ -424,6 +428,8 @@ object SightseeingNetworkModule {
             capturedLongitude = capturedLongitude.toString().toRequestBody(textPlain),
             azimuthDegrees = azimuthDegrees.toString().toRequestBody(textPlain),
             pitchDegrees = pitchDegrees.toString().toRequestBody(textPlain),
+            elevationMeters = elevationMeters.toString().toRequestBody(textPlain),
+            scaleFactor = scaleFactor.toString().toRequestBody(textPlain),
             caption = caption.trim().toRequestBody(textPlain)
         )
     }
@@ -499,5 +505,7 @@ data class PhotoMultipartPayload(
     val capturedLongitude: RequestBody,
     val azimuthDegrees: RequestBody,
     val pitchDegrees: RequestBody,
+    val elevationMeters: RequestBody,
+    val scaleFactor: RequestBody,
     val caption: RequestBody
 )

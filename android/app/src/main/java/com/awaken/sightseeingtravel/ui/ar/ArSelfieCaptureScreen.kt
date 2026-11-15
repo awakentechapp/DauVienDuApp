@@ -2,6 +2,8 @@ package com.awaken.sightseeingtravel.ui.ar
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.view.Surface as AndroidSurface
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,9 +35,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -97,6 +102,7 @@ fun ArSelfieCaptureScreen(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var isCapturing by remember { mutableStateOf(false) }
     var showUploadDialog by remember { mutableStateOf(false) }
+    var showPlacementCamera by remember { mutableStateOf(false) }
     var isFrontCamera by remember { mutableStateOf(true) }
     var pendingPhoto by remember { mutableStateOf<File?>(null) }
     var pendingAnchor by remember { mutableStateOf<PhotoAnchorSnapshot?>(null) }
@@ -124,11 +130,11 @@ fun ArSelfieCaptureScreen(
     val isWithinPoiZone = hasUsableGps &&
         distanceToPoi <= arContext.activationRadiusMeters + 20.0
 
-    DisposableEffect(hasCameraPermission, lifecycleOwner, previewView, isFrontCamera) {
+    DisposableEffect(hasCameraPermission, lifecycleOwner, previewView, isFrontCamera, showPlacementCamera) {
         var disposed = false
         var cameraProvider: ProcessCameraProvider? = null
 
-        if (hasCameraPermission) {
+        if (hasCameraPermission && !showPlacementCamera) {
             val providerFuture = ProcessCameraProvider.getInstance(context)
             providerFuture.addListener({
                 if (!disposed) {
@@ -191,6 +197,13 @@ fun ArSelfieCaptureScreen(
 
     BackHandler(enabled = !showUploadDialog) { closeScreen() }
 
+    val placementPreviewBitmap = remember(pendingPhoto) {
+        pendingPhoto?.let(::decodePlacementPreviewBitmap)
+    }
+    DisposableEffect(placementPreviewBitmap) {
+        onDispose { placementPreviewBitmap?.recycle() }
+    }
+
     val captureSelfie: () -> Unit = {
         val capture = imageCapture
         when {
@@ -215,7 +228,9 @@ fun ArSelfieCaptureScreen(
                     } else {
                         spatialPose.azimuthDegrees
                     },
-                    pitchDegrees = spatialPose.pitchDegrees.coerceIn(-90f, 90f)
+                    pitchDegrees = spatialPose.pitchDegrees.coerceIn(-90f, 90f),
+                    elevationMeters = 1.5f,
+                    scaleFactor = 1f
                 )
                 capture.targetRotation = previewView.display?.rotation ?: AndroidSurface.ROTATION_0
                 isCapturing = true
@@ -229,7 +244,7 @@ fun ArSelfieCaptureScreen(
                             pendingAnchor = anchor
                             caption = ""
                             cameraError = null
-                            showUploadDialog = true
+                            showPlacementCamera = true
                         }
 
                         override fun onError(exception: ImageCaptureException) {
@@ -435,6 +450,19 @@ fun ArSelfieCaptureScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(10.dp))
+                    FilledTonalButton(
+                        onClick = {
+                            showUploadDialog = false
+                            showPlacementCamera = true
+                        },
+                        enabled = pendingAnchor != null && placementPreviewBitmap != null && !isUploadingPhoto,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.ViewInAr, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isEn) "Place in AR camera · zoom" else "Đặt ảnh trong camera AR · thu phóng")
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = caption,
                         onValueChange = { caption = it },
@@ -472,4 +500,53 @@ fun ArSelfieCaptureScreen(
             }
         )
     }
+
+    if (showPlacementCamera && pendingPhoto != null && pendingAnchor != null && placementPreviewBitmap != null) {
+        val anchorAtCapture = pendingAnchor!!
+        ArAnchorPlacementDialog(
+            title = if (isEn) "Place AR photo" else "Đặt ảnh trong AR",
+            poiLatitude = arContext.latitude,
+            poiLongitude = arContext.longitude,
+            currentLatitude = spatialPose.latitude,
+            currentLongitude = spatialPose.longitude,
+            hasFreshGpsFix = spatialPose.hasFreshGpsFix && !spatialPose.isSimulatedLocation,
+            gpsAccuracyMeters = spatialPose.accuracyMeters,
+            currentAzimuthDegrees = spatialPose.azimuthDegrees,
+            maxDistanceFromPoiMeters = arContext.activationRadiusMeters + 20.0,
+            minDistanceFromPoiMeters = 0.0,
+            previewBitmap = placementPreviewBitmap!!,
+            previewWidthMeters = 0.82f,
+            initialScaleFactor = anchorAtCapture.scaleFactor,
+            selectedLanguage = selectedLanguage,
+            onDismiss = {
+                showPlacementCamera = false
+                showUploadDialog = true
+            },
+            onConfirm = { placement ->
+                pendingAnchor = anchorAtCapture.copy(
+                    latitude = placement.latitude,
+                    longitude = placement.longitude,
+                    azimuthDegrees = placement.targetAzimuthDegrees,
+                    elevationMeters = placement.elevationMeters,
+                    scaleFactor = placement.scaleFactor
+                )
+                showPlacementCamera = false
+                showUploadDialog = true
+            }
+        )
+    }
+}
+
+private fun decodePlacementPreviewBitmap(file: File): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    val sampleSize = (maxOf(bounds.outWidth, bounds.outHeight) / 1200).coerceAtLeast(1)
+    return BitmapFactory.decodeFile(
+        file.absolutePath,
+        BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+    )
 }

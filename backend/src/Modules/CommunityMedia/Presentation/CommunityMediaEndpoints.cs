@@ -102,6 +102,28 @@ public static class CommunityMediaEndpoints
                 pitchDegrees = parsedPitch;
             }
 
+            var elevationMeters = 1.5;
+            var rawElevation = form["elevationMeters"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(rawElevation) &&
+                (!TryParseDouble(rawElevation, out elevationMeters) || elevationMeters is < -5.0 or > 20.0))
+            {
+                return ToProblemResult(Result.Failure(new Error(
+                    "PHOTO_INVALID_ELEVATION",
+                    "Elevation must be between -5 and 20 meters.",
+                    ErrorType.Validation)));
+            }
+
+            var scaleFactor = 1.0;
+            var rawScaleFactor = form["scaleFactor"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(rawScaleFactor) &&
+                (!TryParseDouble(rawScaleFactor, out scaleFactor) || scaleFactor is < 0.5 or > 3.0))
+            {
+                return ToProblemResult(Result.Failure(new Error(
+                    "PHOTO_INVALID_SCALE",
+                    "Scale factor must be between 0.5 and 3.0.",
+                    ErrorType.Validation)));
+            }
+
             await using var fileStream = file.OpenReadStream();
             var command = new UploadPhotoCommand(
                 PoiId: poiId,
@@ -112,7 +134,9 @@ public static class CommunityMediaEndpoints
                 CapturedLongitude: capturedLongitude,
                 AzimuthDegrees: azimuthDegrees,
                 PitchDegrees: pitchDegrees,
-                Caption: caption);
+                Caption: caption,
+                ElevationMeters: elevationMeters,
+                ScaleFactor: scaleFactor);
 
             var result = await mediaService.UploadPhotoAsync(command, ct);
 

@@ -61,7 +61,11 @@ public sealed class CommunityPhotoArQueryService : ICommunityPhotoArQueryService
                 p.LikeCount,
                 likedSet.Contains(p.Id),
                 p.AzimuthDegrees,
-                p.CreatedAt))
+                p.CreatedAt,
+                p.CapturedLatitude,
+                p.CapturedLongitude,
+                p.ElevationMeters,
+                p.ScaleFactor))
             .ToList();
     }
 

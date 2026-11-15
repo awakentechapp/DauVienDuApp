@@ -939,6 +939,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         capturedLongitude = anchor.longitude,
                         azimuthDegrees = anchor.azimuthDegrees,
                         pitchDegrees = anchor.pitchDegrees,
+                        elevationMeters = anchor.elevationMeters,
+                        scaleFactor = anchor.scaleFactor,
                         caption = caption
                     )
                 }
@@ -949,6 +951,8 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                     capturedLongitude = multipart.capturedLongitude,
                     azimuthDegrees = multipart.azimuthDegrees,
                     pitchDegrees = multipart.pitchDegrees,
+                    elevationMeters = multipart.elevationMeters,
+                    scaleFactor = multipart.scaleFactor,
                     caption = multipart.caption
                 )
                 val uploadedPhoto = response.data

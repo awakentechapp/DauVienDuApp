@@ -95,6 +95,24 @@ public sealed class CommunityMediaService : ICommunityMediaService
                 ErrorType.Validation));
         }
 
+        if (double.IsNaN(command.ElevationMeters) || double.IsInfinity(command.ElevationMeters) ||
+            command.ElevationMeters is < -5.0 or > 20.0)
+        {
+            return Result.Failure<CommunityPhotoDto>(new Error(
+                "PHOTO_INVALID_ELEVATION",
+                "Elevation must be between -5 and 20 meters.",
+                ErrorType.Validation));
+        }
+
+        if (double.IsNaN(command.ScaleFactor) || double.IsInfinity(command.ScaleFactor) ||
+            command.ScaleFactor is < 0.5 or > 3.0)
+        {
+            return Result.Failure<CommunityPhotoDto>(new Error(
+                "PHOTO_INVALID_SCALE",
+                "Scale factor must be between 0.5 and 3.0.",
+                ErrorType.Validation));
+        }
+
         if (!string.IsNullOrWhiteSpace(command.Caption) && command.Caption.Trim().Length > CommunityPhoto.MaxCaptionLength)
         {
             return Result.Failure<CommunityPhotoDto>(new Error(
@@ -195,7 +213,9 @@ public sealed class CommunityMediaService : ICommunityMediaService
             distanceFromPoiMeters: actualDistanceMeters,
             azimuthDegrees: command.AzimuthDegrees,
             pitchDegrees: command.PitchDegrees,
-            createdAt: now);
+            createdAt: now,
+            elevationMeters: command.ElevationMeters,
+            scaleFactor: command.ScaleFactor);
 
         _dbContext.CommunityPhotos.Add(photo);
         await _dbContext.SaveChangesAsync(ct);
@@ -489,7 +509,9 @@ public sealed class CommunityMediaService : ICommunityMediaService
             photo.PitchDegrees,
             photo.LikeCount,
             isLikedByCurrentUser,
-            photo.CreatedAt);
+            photo.CreatedAt,
+            photo.ElevationMeters,
+            photo.ScaleFactor);
 
     private AdminReportedPhotoDto MapToAdminReportedPhotoDto(CommunityPhoto photo) =>
         new(

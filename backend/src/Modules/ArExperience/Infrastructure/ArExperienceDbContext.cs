@@ -45,6 +45,10 @@ public sealed class ArExperienceDbContext : DbContext
             builder.Property(x => x.ElevationMeters)
                 .IsRequired();
 
+            builder.Property(x => x.ScaleFactor)
+                .HasDefaultValue(1.0)
+                .IsRequired();
+
             builder.Property(x => x.DisplayOrder)
                 .IsRequired();
 

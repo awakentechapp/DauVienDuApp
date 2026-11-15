@@ -96,6 +96,16 @@ public static class DatabaseInitializerAndSeeder
             await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
         }
 
+        var arContentPlacementMigration = typeof(DatabaseInitializerAndSeeder).Assembly
+            .GetManifestResourceStream("SightseeingTravel.Api.Migrations.0008_ArContentPlacementScale.sql")
+            ?? throw new InvalidOperationException("AR content placement migration resource is missing.");
+        await using (arContentPlacementMigration)
+        using (var reader = new StreamReader(arContentPlacementMigration))
+        {
+            var migrationSql = await reader.ReadToEndAsync(cancellationToken);
+            await arDb.Database.ExecuteSqlRawAsync(migrationSql, cancellationToken);
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var superAdmin = await identityDb.Users

@@ -242,7 +242,8 @@ data class ArInfoCardDto(
     @SerializedName("anchorDistanceMeters") val anchorDistanceMeters: Float = 8.0f,
     @SerializedName("displayOrder") val displayOrder: Int = 0,
     @SerializedName("modelUrl") val modelUrl: String? = null,
-    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float = 0f
+    @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float = 0f,
+    @SerializedName("scaleFactor") val scaleFactor: Float = 1f
 )
 
 /**
@@ -283,6 +284,7 @@ data class CommunityPhotoDto(
     @SerializedName("azimuthDegrees") val azimuthDegrees: Float? = null,
     @SerializedName("pitchDegrees") val pitchDegrees: Float? = null,
     @SerializedName("elevationMeters") val elevationMeters: Float = 1.5f,
+    @SerializedName("scaleFactor") val scaleFactor: Float = 1f,
     @SerializedName("likeCount") val likeCount: Int = 0,
     @SerializedName("isLikedByCurrentUser") val isLikedByCurrentUser: Boolean = false,
     @SerializedName("isHighlightedInAr") val isHighlightedInAr: Boolean = false,
@@ -351,7 +353,8 @@ data class UpsertArInfoCardRequest(
     @SerializedName("elevationMeters") val elevationMeters: Float,
     @SerializedName("displayOrder") val displayOrder: Int,
     @SerializedName("isActive") val isActive: Boolean,
-    @SerializedName("localizations") val localizations: List<ArCardLocalizationInputDto>
+    @SerializedName("localizations") val localizations: List<ArCardLocalizationInputDto>,
+    @SerializedName("scaleFactor") val scaleFactor: Float = 1f
 )
 
 data class AdminArInfoCardDto(
@@ -368,7 +371,8 @@ data class AdminArInfoCardDto(
     @SerializedName("modelError") val modelError: String? = null,
     @SerializedName("modelRotationDegrees") val modelRotationDegrees: Double = 0.0,
     @SerializedName("modelName") val modelName: String? = null,
-    @SerializedName("modelCategory") val modelCategory: String = "Object"
+    @SerializedName("modelCategory") val modelCategory: String = "Object",
+    @SerializedName("scaleFactor") val scaleFactor: Float = 1f
 )
 
 data class ArModelLibraryItemDto(
@@ -390,7 +394,8 @@ data class PlaceArModelRequest(
     @SerializedName("distanceMeters") val distanceMeters: Float,
     @SerializedName("elevationMeters") val elevationMeters: Float,
     @SerializedName("modelRotationDegrees") val modelRotationDegrees: Float,
-    @SerializedName("sourceModelId") val sourceModelId: String = sourceCardId
+    @SerializedName("sourceModelId") val sourceModelId: String = sourceCardId,
+    @SerializedName("scaleFactor") val scaleFactor: Float = 1f
 )
 
 data class ArModelBuildSubmissionDto(

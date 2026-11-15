@@ -13,7 +13,8 @@ public sealed record ArInfoCardDto(
     double ElevationMeters,
     int DisplayOrder,
     string? ModelUrl = null,
-    double ModelRotationDegrees = 0.0);
+    double ModelRotationDegrees = 0.0,
+    double ScaleFactor = 1.0);
 
 public sealed record ArContextResponse(
     Guid PoiId,
@@ -37,7 +38,8 @@ public sealed record UpsertArInfoCardRequest(
     double ElevationMeters,
     int DisplayOrder,
     bool IsActive,
-    IReadOnlyList<ArCardLocalizationInputDto> Localizations);
+    IReadOnlyList<ArCardLocalizationInputDto> Localizations,
+    double ScaleFactor = 1.0);
 
 public sealed record AdminArInfoCardDto(
     Guid Id,
@@ -53,7 +55,8 @@ public sealed record AdminArInfoCardDto(
     string? ModelError = null,
     double ModelRotationDegrees = 0.0,
     string? ModelName = null,
-    string ModelCategory = "Object");
+    string ModelCategory = "Object",
+    double ScaleFactor = 1.0);
 
 public sealed record ArModelLibraryItemDto(
     Guid SourceCardId,
@@ -73,4 +76,5 @@ public sealed record PlaceArModelRequest(
     double DistanceMeters,
     double ElevationMeters,
     double ModelRotationDegrees,
-    Guid? SourceModelId = null);
+    Guid? SourceModelId = null,
+    double ScaleFactor = 1.0);

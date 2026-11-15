@@ -1,6 +1,7 @@
 package com.awaken.sightseeingtravel.ui.admin
 
 import android.Manifest
+import android.graphics.Bitmap
 import android.net.Uri
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -31,6 +32,8 @@ import com.awaken.sightseeingtravel.core.model.*
 import com.awaken.sightseeingtravel.core.sensor.LocationAndOrientationTracker
 import com.awaken.sightseeingtravel.ui.BrandColors
 import com.awaken.sightseeingtravel.ui.map.PoiCoordinatePickerDialog
+import com.awaken.sightseeingtravel.ui.ar.ArAnchorPlacementDialog
+import com.awaken.sightseeingtravel.ui.ar.createArCardPlacementBitmap
 import kotlinx.coroutines.launch
 import androidx.core.content.ContextCompat
 import java.io.File
@@ -886,6 +889,17 @@ private fun CreateFixedArCardDialog(
     var isSubmitting by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var capturedPlacement by remember(poi.id) { mutableStateOf<CapturedArPlacement?>(null) }
+    var showPlacementCamera by remember(poi.id) { mutableStateOf(false) }
+    var hasCameraPlacement by remember(poi.id) { mutableStateOf(false) }
+    var placementScaleFactor by remember(poi.id) { mutableFloatStateOf(1f) }
+    var placementPreviewBitmap by remember(poi.id) { mutableStateOf<Bitmap?>(null) }
+
+    DisposableEffect(placementPreviewBitmap) {
+        val bitmap = placementPreviewBitmap
+        onDispose {
+            if (bitmap != null && !bitmap.isRecycled) bitmap.recycle()
+        }
+    }
 
     val distanceToPoi = LocationAndOrientationTracker.calculateDistanceMeters(
         currentLatitude,
@@ -894,13 +908,13 @@ private fun CreateFixedArCardDialog(
         poi.longitude
     )
     val isAtPoi = hasFreshGpsFix && distanceToPoi <= poi.activationRadiusMeters + 20.0
-    val canCapturePlacement = isAtPoi && distanceToPoi <= 50.0
+    val canCapturePlacement = isAtPoi && gpsAccuracyMeters <= 15f && distanceToPoi <= 50.0
     val azimuth = azimuthText.replace(',', '.').toDoubleOrNull()
     val anchorDistance = distanceText.replace(',', '.').toDoubleOrNull()
     val elevation = elevationText.replace(',', '.').toDoubleOrNull()
     val hasContent = (titleVi.isNotBlank() || titleEn.isNotBlank()) &&
         (contentVi.isNotBlank() || contentEn.isNotBlank())
-    val canSubmit = capturedPlacement != null && hasContent && azimuth != null && azimuth in 0.0..360.0 &&
+    val canSubmit = capturedPlacement != null && hasCameraPlacement && hasContent && azimuth != null && azimuth in 0.0..360.0 &&
         anchorDistance != null && anchorDistance in 1.0..50.0 &&
         elevation != null && elevation in -5.0..20.0 && !isSubmitting
 
@@ -925,14 +939,22 @@ private fun CreateFixedArCardDialog(
             ) {
                 Text(
                     text = capturedPlacement?.let { placement ->
-                        if (isEn) "AR position saved • GPS ±${placement.accuracyMeters.roundToInt()}m • ${placement.distanceMeters.roundToInt()}m from POI. You can move away and finish entering the card."
-                        else "Đã lưu vị trí AR • GPS ±${placement.accuracyMeters.roundToInt()}m • cách POI ${placement.distanceMeters.roundToInt()}m. Bạn có thể rời vị trí và nhập nội dung tiếp."
+                        if (hasCameraPlacement) {
+                            if (isEn) "Camera placement saved • GPS ±${placement.accuracyMeters.roundToInt()}m • ${placement.distanceMeters.roundToInt()}m from POI • size ${"%.2f".format(placementScaleFactor)}×."
+                            else "Đã đặt bằng camera AR • GPS ±${placement.accuracyMeters.roundToInt()}m • cách POI ${placement.distanceMeters.roundToInt()}m • cỡ ${"%.2f".format(placementScaleFactor)}×."
+                        } else {
+                            if (isEn) "A live AR camera placement is required before saving this card."
+                            else "Cần mở camera AR và chọn vị trí trước khi lưu thẻ này."
+                        }
                     } ?: if (canCapturePlacement) {
-                        if (isEn) "Stand at the intended AR position, then save it here. You can move away after the position is captured."
-                        else "Đứng tại vị trí muốn đặt AR rồi lưu vị trí bên dưới. Sau khi lưu, bạn có thể rời đi để nhập dữ liệu."
+                        if (isEn) "Move near the POI, open the AR camera and tap the surface where the card should appear."
+                        else "Đến gần POI, mở camera AR rồi chạm vào mặt phẳng tại nơi muốn hiển thị thẻ."
                     } else if (!hasFreshGpsFix) {
                         if (isEn) "Waiting for an accurate live GPS fix before saving an AR position."
                         else "Cần GPS thực đủ chính xác trước khi lưu vị trí AR."
+                    } else if (gpsAccuracyMeters > 15f) {
+                        if (isEn) "Improve GPS accuracy to 15m or better before opening AR placement."
+                        else "Cần chờ GPS đạt sai số 15 m hoặc tốt hơn trước khi mở chế độ đặt AR."
                     } else if (distanceToPoi > 50.0) {
                         if (isEn) "The AR position must be within 50m of this POI."
                         else "Vị trí AR cần nằm trong phạm vi 50m quanh POI này."
@@ -943,66 +965,6 @@ private fun CreateFixedArCardDialog(
                     color = if (capturedPlacement != null || canCapturePlacement) Color(0xFF15803D) else Color(0xFFB45309),
                     style = MaterialTheme.typography.bodySmall
                 )
-                FilledTonalButton(
-                    onClick = {
-                        val placementDistance = distanceToPoi.coerceIn(1.0, 50.0)
-                        val placementAzimuth = if (distanceToPoi < 1.0) {
-                            ((currentAzimuthDegrees % 360f) + 360f) % 360f
-                        } else {
-                            LocationAndOrientationTracker.calculateBearingDegrees(
-                                poi.latitude,
-                                poi.longitude,
-                                currentLatitude,
-                                currentLongitude
-                            )
-                        }
-                        capturedPlacement = CapturedArPlacement(
-                            latitude = currentLatitude,
-                            longitude = currentLongitude,
-                            accuracyMeters = gpsAccuracyMeters,
-                            azimuthDegrees = placementAzimuth,
-                            distanceMeters = placementDistance
-                        )
-                        azimuthText = placementAzimuth.toString()
-                        distanceText = java.lang.String.format(java.util.Locale.US, "%.1f", placementDistance)
-                    },
-                    enabled = canCapturePlacement && !isSubmitting,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        when {
-                            capturedPlacement != null -> if (isEn) "Update AR position here" else "Cập nhật vị trí AR tại đây"
-                            isEn -> "Save AR position here"
-                            else -> "Lưu vị trí AR tại đây"
-                        }
-                    )
-                }
-                capturedPlacement?.let { placement ->
-                    Text(
-                        text = if (isEn) {
-                            "Saved coordinates: ${formatGpsCoordinate(placement.latitude)}, ${formatGpsCoordinate(placement.longitude)} • Bearing ${placement.azimuthDegrees.roundToInt()}°"
-                        } else {
-                            "Tọa độ đã lưu: ${formatGpsCoordinate(placement.latitude)}, ${formatGpsCoordinate(placement.longitude)} • Hướng ${placement.azimuthDegrees.roundToInt()}°"
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                FilledTonalButton(
-                    onClick = {
-                        val cameraBearing = ((currentAzimuthDegrees % 360f) + 360f) % 360f
-                        azimuthText = cameraBearing.toString()
-                        capturedPlacement = capturedPlacement?.copy(azimuthDegrees = cameraBearing)
-                    },
-                    enabled = canCapturePlacement && capturedPlacement != null && !isSubmitting,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (isEn) "Adjust to current compass heading" else "Chỉnh theo hướng la bàn hiện tại")
-                }
                 OutlinedTextField(
                     value = titleVi,
                     onValueChange = { titleVi = it },
@@ -1029,22 +991,54 @@ private fun CreateFixedArCardDialog(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2
                 )
+                FilledTonalButton(
+                    onClick = {
+                        placementPreviewBitmap = createArCardPlacementBitmap(
+                            title = if (isEn) titleEn.ifBlank { titleVi } else titleVi.ifBlank { titleEn },
+                            content = if (isEn) contentEn.ifBlank { contentVi } else contentVi.ifBlank { contentEn }
+                        )
+                        showPlacementCamera = true
+                    },
+                    enabled = canCapturePlacement && hasContent && !isSubmitting,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        when {
+                            hasCameraPlacement -> if (isEn) "Adjust AR placement in camera" else "Điều chỉnh vị trí trong camera AR"
+                            isEn -> "Open AR camera to place card"
+                            else -> "Mở camera AR để đặt thẻ"
+                        }
+                    )
+                }
+                capturedPlacement?.let { placement ->
+                    Text(
+                        text = if (isEn) {
+                            "Saved coordinates: ${formatGpsCoordinate(placement.latitude)}, ${formatGpsCoordinate(placement.longitude)} • Bearing ${placement.azimuthDegrees.roundToInt()}°"
+                        } else {
+                            "Tọa độ đã lưu: ${formatGpsCoordinate(placement.latitude)}, ${formatGpsCoordinate(placement.longitude)} • Hướng ${placement.azimuthDegrees.roundToInt()}°"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 OutlinedTextField(
                     value = azimuthText,
-                    onValueChange = { azimuthText = it },
+                    onValueChange = { azimuthText = it; hasCameraPlacement = false },
                     label = { Text(if (isEn) "Pinned compass bearing (0–360°)" else "Hướng la bàn đã ghim (0–360°)") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = distanceText,
-                        onValueChange = { distanceText = it },
+                        onValueChange = { distanceText = it; hasCameraPlacement = false },
                         label = { Text(if (isEn) "Distance (1–50m)" else "Khoảng cách (1–50m)") },
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
                         value = elevationText,
-                        onValueChange = { elevationText = it },
+                        onValueChange = { elevationText = it; hasCameraPlacement = false },
                         label = { Text(if (isEn) "Height (−5–20m)" else "Độ cao (−5–20m)") },
                         modifier = Modifier.weight(1f)
                     )
@@ -1071,6 +1065,7 @@ private fun CreateFixedArCardDialog(
                             elevationMeters = cardElevation.toFloat(),
                             displayOrder = 1,
                             isActive = true,
+                            scaleFactor = placementScaleFactor,
                             localizations = listOf(
                                 ArCardLocalizationInputDto(
                                     languageCode = "vi",
@@ -1099,6 +1094,46 @@ private fun CreateFixedArCardDialog(
             }
         }
     )
+
+    if (showPlacementCamera && placementPreviewBitmap != null) {
+        ArAnchorPlacementDialog(
+            title = if (isEn) "Place AR card" else "Đặt thẻ AR",
+            poiLatitude = poi.latitude,
+            poiLongitude = poi.longitude,
+            currentLatitude = currentLatitude,
+            currentLongitude = currentLongitude,
+            hasFreshGpsFix = hasFreshGpsFix,
+            gpsAccuracyMeters = gpsAccuracyMeters,
+            currentAzimuthDegrees = currentAzimuthDegrees,
+            maxDistanceFromPoiMeters = 50.0,
+            minDistanceFromPoiMeters = 1.0,
+            previewBitmap = placementPreviewBitmap!!,
+            previewWidthMeters = 0.88f,
+            initialScaleFactor = placementScaleFactor,
+            selectedLanguage = selectedLanguage,
+            onDismiss = {
+                showPlacementCamera = false
+                placementPreviewBitmap = null
+            },
+            onConfirm = { placement ->
+                capturedPlacement = CapturedArPlacement(
+                    latitude = placement.latitude,
+                    longitude = placement.longitude,
+                    accuracyMeters = gpsAccuracyMeters,
+                    azimuthDegrees = placement.poiAzimuthDegrees,
+                    distanceMeters = placement.distanceFromPoiMeters.toDouble()
+                )
+                azimuthText = placement.poiAzimuthDegrees.toString()
+                distanceText = java.lang.String.format(java.util.Locale.US, "%.1f", placement.distanceFromPoiMeters)
+                elevationText = placement.elevationMeters.toString()
+                placementScaleFactor = placement.scaleFactor
+                hasCameraPlacement = true
+                showPlacementCamera = false
+                placementPreviewBitmap = null
+                errorMessage = null
+            }
+        )
+    }
 }
 
 @Composable
@@ -1122,6 +1157,7 @@ private fun EditArInfoCardDialog(
     var azimuthText by remember(card.id) { mutableStateOf(card.azimuthDegrees.toString()) }
     var distanceText by remember(card.id) { mutableStateOf(card.distanceMeters.toString()) }
     var elevationText by remember(card.id) { mutableStateOf(card.elevationMeters.toString()) }
+    var scaleFactorText by remember(card.id) { mutableStateOf(card.scaleFactor.toString()) }
     var displayOrderText by remember(card.id) { mutableStateOf(card.displayOrder.toString()) }
     var isActive by remember(card.id) { mutableStateOf(card.isActive) }
     var isSubmitting by remember { mutableStateOf(false) }
@@ -1130,11 +1166,13 @@ private fun EditArInfoCardDialog(
     val azimuth = azimuthText.replace(',', '.').toDoubleOrNull()
     val distance = distanceText.replace(',', '.').toDoubleOrNull()
     val elevation = elevationText.replace(',', '.').toDoubleOrNull()
+    val scaleFactor = scaleFactorText.replace(',', '.').toDoubleOrNull()
     val displayOrder = displayOrderText.toIntOrNull()
     val hasContent = (titleVi.isNotBlank() || titleEn.isNotBlank()) &&
         (contentVi.isNotBlank() || contentEn.isNotBlank())
     val canSubmit = hasContent && cardType.isNotBlank() && azimuth != null && azimuth in 0.0..360.0 &&
         distance != null && distance in 1.0..50.0 && elevation != null && elevation in -5.0..20.0 &&
+        scaleFactor != null && scaleFactor in 0.5..3.0 &&
         displayOrder != null && displayOrder >= 1 && !isSubmitting
 
     AlertDialog(
@@ -1157,6 +1195,7 @@ private fun EditArInfoCardDialog(
                     OutlinedTextField(distanceText, { distanceText = it }, label = { Text("Khoảng cách (1–50m)") }, modifier = Modifier.weight(1f))
                     OutlinedTextField(elevationText, { elevationText = it }, label = { Text("Độ cao (−5–20m)") }, modifier = Modifier.weight(1f))
                 }
+                OutlinedTextField(scaleFactorText, { scaleFactorText = it }, label = { Text(if (isEn) "AR size (0.5–3×)" else "Kích thước AR (0,5–3×)") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(displayOrderText, { displayOrderText = it }, label = { Text("Thứ tự hiển thị") }, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (isEn) "Active" else "Kích hoạt", modifier = Modifier.weight(1f))
@@ -1172,6 +1211,7 @@ private fun EditArInfoCardDialog(
                     val az = azimuth ?: return@Button
                     val dist = distance ?: return@Button
                     val elev = elevation ?: return@Button
+                    val visualScale = scaleFactor ?: return@Button
                     val order = displayOrder ?: return@Button
                     val request = UpsertArInfoCardRequest(
                         cardType = cardType.trim(),
@@ -1180,6 +1220,7 @@ private fun EditArInfoCardDialog(
                         elevationMeters = elev.toFloat(),
                         displayOrder = order,
                         isActive = isActive,
+                        scaleFactor = visualScale.toFloat(),
                         localizations = listOf(
                             ArCardLocalizationInputDto(
                                 languageCode = "vi",
@@ -1209,6 +1250,7 @@ private fun EditArInfoCardDialog(
             TextButton(onClick = onDismiss, enabled = !isSubmitting) { Text("Hủy") }
         }
     )
+
 }
 
 @Composable

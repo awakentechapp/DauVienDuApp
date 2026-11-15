@@ -116,7 +116,8 @@ public sealed class ArExperienceService : IArExperienceService
                 card.ModelObjectKey is null || _objectStorageService is null
                     ? null
                     : _objectStorageService.CreateReadUrl(card.ModelObjectKey),
-                card.ModelRotationDegrees));
+                card.ModelRotationDegrees,
+                card.ScaleFactor));
         }
 
         var highlightedPhotos = await _communityPhotoArQueryService.GetTopPhotosForArAsync(
@@ -310,7 +311,8 @@ public sealed class ArExperienceService : IArExperienceService
             request.ElevationMeters,
             nextDisplayOrder,
             isActive: true,
-            nowUtc);
+            nowUtc,
+            request.ScaleFactor);
         if (createResult.IsFailure)
         {
             return Result.Failure<AdminArInfoCardDto>(createResult.Error);
@@ -372,7 +374,8 @@ public sealed class ArExperienceService : IArExperienceService
             request.ElevationMeters,
             request.DisplayOrder,
             request.IsActive,
-            nowUtc);
+            nowUtc,
+            request.ScaleFactor);
 
         if (createResult.IsFailure)
         {
@@ -428,7 +431,8 @@ public sealed class ArExperienceService : IArExperienceService
             request.ElevationMeters,
             request.DisplayOrder,
             request.IsActive,
-            nowUtc);
+            nowUtc,
+            request.ScaleFactor);
 
         if (updateResult.IsFailure)
         {
@@ -513,6 +517,7 @@ public sealed class ArExperienceService : IArExperienceService
             card.ModelError,
             card.ModelRotationDegrees,
             card.ModelName,
-            card.ModelCategory.ToString());
+            card.ModelCategory.ToString(),
+            card.ScaleFactor);
     }
 }

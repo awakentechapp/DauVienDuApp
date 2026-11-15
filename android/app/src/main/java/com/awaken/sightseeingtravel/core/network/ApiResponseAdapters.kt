@@ -125,7 +125,8 @@ internal object ApiResponseAdapters {
                 anchorDistanceMeters = value.double("distanceMeters", "anchorDistanceMeters", default = 8.0).toFloat(),
                 displayOrder = value.int("displayOrder"),
                 modelUrl = value.nullableString("modelUrl"),
-                modelRotationDegrees = value.double("modelRotationDegrees", default = 0.0).toFloat()
+                modelRotationDegrees = value.double("modelRotationDegrees", default = 0.0).toFloat(),
+                scaleFactor = value.double("scaleFactor", default = 1.0).toFloat()
             )
         }
     }
@@ -165,6 +166,7 @@ internal object ApiResponseAdapters {
                 azimuthDegrees = value.nullableDouble("azimuthDegrees")?.toFloat(),
                 pitchDegrees = value.nullableDouble("pitchDegrees")?.toFloat(),
                 elevationMeters = value.double("elevationMeters", default = 1.5).toFloat(),
+                scaleFactor = value.double("scaleFactor", default = 1.0).toFloat(),
                 likeCount = value.int("likeCount", "likesCount"),
                 isLikedByCurrentUser = value.nullableBoolean("isLikedByCurrentUser") ?: false,
                 isHighlightedInAr = value.nullableBoolean("isHighlightedInAr") ?: false,

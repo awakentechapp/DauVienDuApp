@@ -8,7 +8,11 @@ public sealed record ArHighlightedPhotoDto(
     int LikeCount,
     bool IsLikedByCurrentUser,
     double? AzimuthDegrees,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    double CapturedLatitude = 0.0,
+    double CapturedLongitude = 0.0,
+    double ElevationMeters = 1.5,
+    double ScaleFactor = 1.0);
 
 public interface ICommunityPhotoArQueryService
 {

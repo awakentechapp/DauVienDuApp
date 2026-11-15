@@ -31,6 +31,7 @@ public sealed class ArInfoCard : AuditableEntity
     public double AzimuthDegrees { get; set; }
     public double DistanceMeters { get; set; } = 5.0;
     public double ElevationMeters { get; set; }
+    public double ScaleFactor { get; set; } = 1.0;
     public int DisplayOrder { get; set; }
     public bool IsActive { get; set; } = true;
     public string? ModelObjectKey { get; private set; }
@@ -55,7 +56,8 @@ public sealed class ArInfoCard : AuditableEntity
         double elevationMeters,
         int displayOrder,
         bool isActive,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        double scaleFactor)
     {
         Id = id;
         PoiId = poiId;
@@ -63,6 +65,7 @@ public sealed class ArInfoCard : AuditableEntity
         AzimuthDegrees = azimuthDegrees;
         DistanceMeters = distanceMeters;
         ElevationMeters = elevationMeters;
+        ScaleFactor = scaleFactor;
         DisplayOrder = displayOrder;
         IsActive = isActive;
         CreatedAt = nowUtc;
@@ -77,7 +80,8 @@ public sealed class ArInfoCard : AuditableEntity
         double elevationMeters,
         int displayOrder,
         bool isActive,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        double scaleFactor = 1.0)
     {
         if (poiId == Guid.Empty)
         {
@@ -92,6 +96,11 @@ public sealed class ArInfoCard : AuditableEntity
         {
             return Result.Failure<ArInfoCard>(placementValidation.Error);
         }
+        var scaleValidation = ValidateScaleFactor(scaleFactor);
+        if (scaleValidation.IsFailure)
+        {
+            return Result.Failure<ArInfoCard>(scaleValidation.Error);
+        }
 
         var card = new ArInfoCard(
             Guid.NewGuid(),
@@ -102,7 +111,8 @@ public sealed class ArInfoCard : AuditableEntity
             Math.Round(elevationMeters, 2),
             displayOrder,
             isActive,
-            nowUtc);
+            nowUtc,
+            Math.Round(scaleFactor, 2));
 
         return Result.Success(card);
     }
@@ -114,21 +124,41 @@ public sealed class ArInfoCard : AuditableEntity
         double elevationMeters,
         int displayOrder,
         bool isActive,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        double scaleFactor = 1.0)
     {
         var placementValidation = ValidateSpatialPlacement(azimuthDegrees, distanceMeters, elevationMeters, displayOrder);
         if (placementValidation.IsFailure)
         {
             return placementValidation;
         }
+        var scaleValidation = ValidateScaleFactor(scaleFactor);
+        if (scaleValidation.IsFailure)
+        {
+            return scaleValidation;
+        }
 
         CardType = cardType;
         AzimuthDegrees = Math.Round(azimuthDegrees, 2);
         DistanceMeters = Math.Round(distanceMeters, 2);
         ElevationMeters = Math.Round(elevationMeters, 2);
+        ScaleFactor = Math.Round(scaleFactor, 2);
         DisplayOrder = displayOrder;
         IsActive = isActive;
         UpdatedAt = nowUtc;
+
+        return Result.Success();
+    }
+
+    private static Result ValidateScaleFactor(double scaleFactor)
+    {
+        if (double.IsNaN(scaleFactor) || double.IsInfinity(scaleFactor) || scaleFactor is < 0.5 or > 3.0)
+        {
+            return Result.Failure(new Error(
+                "AR_CARD_INVALID_SCALE",
+                "ScaleFactor must be between 0.5 and 3.0.",
+                ErrorType.Validation));
+        }
 
         return Result.Success();
     }

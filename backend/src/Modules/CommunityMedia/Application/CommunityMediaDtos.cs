@@ -14,7 +14,9 @@ public sealed record CommunityPhotoDto(
     double? PitchDegrees,
     int LikeCount,
     bool IsLikedByCurrentUser,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    double ElevationMeters = 1.5,
+    double ScaleFactor = 1.0);
 
 public sealed record UploadPhotoCommand(
     Guid PoiId,
@@ -25,7 +27,9 @@ public sealed record UploadPhotoCommand(
     double CapturedLongitude,
     double? AzimuthDegrees,
     double? PitchDegrees,
-    string? Caption);
+    string? Caption,
+    double ElevationMeters = 1.5,
+    double ScaleFactor = 1.0);
 
 public sealed record ToggleLikeResponse(
     Guid PhotoId,
