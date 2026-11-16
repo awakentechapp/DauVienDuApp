@@ -47,6 +47,7 @@ data class SightseeingUiState(
     val navigationTarget: NavigationTarget? = null,
     val navigationTravelMode: NavigationTravelMode = NavigationTravelMode.CAR,
     val activeNavigationRoute: ActiveNavigationRoute? = null,
+    val isNavigationPaused: Boolean = false,
     val isCalculatingRoute: Boolean = false,
     val navigationError: String? = null,
     val activeArContext: PoiArContextDto? = null,
@@ -77,8 +78,77 @@ data class ActiveNavigationRoute(
     val travelMode: NavigationTravelMode,
     val distanceMeters: Double,
     val durationSeconds: Double,
-    val coordinates: List<RouteCoordinateDto>
+    val coordinates: List<RouteCoordinateDto>,
+    val progressFraction: Double = 0.0
 )
+
+private data class NavigationRouteProjection(
+    val progressFraction: Double,
+    val distanceFromRouteMeters: Double
+)
+
+private fun projectOntoNavigationRoute(
+    coordinates: List<RouteCoordinateDto>,
+    latitude: Double,
+    longitude: Double,
+    currentProgressFraction: Double
+): NavigationRouteProjection? {
+    if (coordinates.size < 2) return null
+
+    val segmentLengths = coordinates.zipWithNext { start, end ->
+        LocationAndOrientationTracker.calculateDistanceMeters(
+            start.latitude,
+            start.longitude,
+            end.latitude,
+            end.longitude
+        )
+    }
+    val routeLengthMeters = segmentLengths.sum()
+    if (routeLengthMeters <= 0.0) return null
+
+    val minimumAlongRouteMeters =
+        (routeLengthMeters * currentProgressFraction - 35.0).coerceAtLeast(0.0)
+    var traversedMeters = 0.0
+    var closestProjection: NavigationRouteProjection? = null
+
+    for (index in segmentLengths.indices) {
+        val start = coordinates[index]
+        val end = coordinates[index + 1]
+        val segmentLength = segmentLengths[index]
+        val meanLatitudeRadians = Math.toRadians((start.latitude + end.latitude) / 2.0)
+        val longitudeScale = 111_320.0 * Math.cos(meanLatitudeRadians)
+        val deltaX = (end.longitude - start.longitude) * longitudeScale
+        val deltaY = (end.latitude - start.latitude) * 111_320.0
+        val segmentLengthSquared = deltaX * deltaX + deltaY * deltaY
+        val fractionOnSegment = if (segmentLengthSquared <= 0.0) {
+            0.0
+        } else {
+            val pointX = (longitude - start.longitude) * longitudeScale
+            val pointY = (latitude - start.latitude) * 111_320.0
+            ((pointX * deltaX + pointY * deltaY) / segmentLengthSquared).coerceIn(0.0, 1.0)
+        }
+        val alongRouteMeters = traversedMeters + segmentLength * fractionOnSegment
+        if (alongRouteMeters >= minimumAlongRouteMeters) {
+            val snappedLatitude = start.latitude + (end.latitude - start.latitude) * fractionOnSegment
+            val snappedLongitude = start.longitude + (end.longitude - start.longitude) * fractionOnSegment
+            val distanceFromRouteMeters = LocationAndOrientationTracker.calculateDistanceMeters(
+                latitude,
+                longitude,
+                snappedLatitude,
+                snappedLongitude
+            )
+            if (closestProjection == null || distanceFromRouteMeters < closestProjection.distanceFromRouteMeters) {
+                closestProjection = NavigationRouteProjection(
+                    progressFraction = (alongRouteMeters / routeLengthMeters).coerceIn(0.0, 1.0),
+                    distanceFromRouteMeters = distanceFromRouteMeters
+                )
+            }
+        }
+        traversedMeters += segmentLength
+    }
+
+    return closestProjection
+}
 
 class SightseeingAppViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -88,6 +158,9 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
         private const val NEARBY_POI_AUTO_REFRESH_DISTANCE_METERS = 250.0
         private const val NEARBY_POI_AUTO_REFRESH_DEBOUNCE_MILLIS = 800L
         private const val NEARBY_POI_AUTO_REFRESH_MAX_GPS_ACCURACY_METERS = 100f
+        private const val NAVIGATION_MAX_GPS_ACCURACY_METERS = 100f
+        private const val NAVIGATION_ROUTE_MATCH_DISTANCE_METERS = 120.0
+        private const val NAVIGATION_OFF_ROUTE_DISTANCE_METERS = 100.0
     }
 
     val tokenStore = TokenStore(application)
@@ -131,6 +204,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 .map { it.latitude to it.longitude }
                 .distinctUntilChanged()
                 .collect {
+                    updateNavigationProgress(spatialPose.value)
                     maybeRefreshNavigationRoute()
                 }
         }
@@ -617,6 +691,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                 navigationTarget = target,
                 navigationTravelMode = travelMode,
                 activeNavigationRoute = null,
+                isNavigationPaused = false,
                 isCalculatingRoute = false,
                 navigationError = null
             )
@@ -705,6 +780,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
                         )
                     )
                 }
+                updateNavigationProgress(spatialPose.value)
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 val statusCode = (error as? retrofit2.HttpException)?.code()
@@ -746,10 +822,20 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
     private fun maybeRefreshNavigationRoute() {
         val state = _uiState.value
         val target = state.navigationTarget ?: return
-        if (state.activeNavigationRoute == null || state.isCalculatingRoute) return
+        val route = state.activeNavigationRoute ?: return
+        if (state.isCalculatingRoute || state.isNavigationPaused) return
 
         val pose = spatialPose.value
         if (!pose.hasFreshGpsFix || pose.isSimulatedLocation) return
+        if (pose.accuracyMeters > NAVIGATION_MAX_GPS_ACCURACY_METERS) return
+
+        val projection = projectOntoNavigationRoute(
+            route.coordinates,
+            pose.latitude,
+            pose.longitude,
+            route.progressFraction
+        ) ?: return
+        if (projection.distanceFromRouteMeters <= NAVIGATION_OFF_ROUTE_DISTANCE_METERS) return
 
         val origin = lastNavigationRequestLocation ?: return
         val movedMeters = LocationAndOrientationTracker.calculateDistanceMeters(
@@ -768,6 +854,60 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             longitude = target.longitude,
             travelMode = state.navigationTravelMode
         )
+    }
+
+    private fun updateNavigationProgress(pose: DeviceSpatialPose) {
+        val state = _uiState.value
+        val route = state.activeNavigationRoute ?: return
+        if (state.navigationTarget == null || state.isNavigationPaused) return
+        if (!pose.hasFreshGpsFix || pose.isSimulatedLocation) return
+        if (pose.accuracyMeters > NAVIGATION_MAX_GPS_ACCURACY_METERS) return
+
+        val projection = projectOntoNavigationRoute(
+            route.coordinates,
+            pose.latitude,
+            pose.longitude,
+            route.progressFraction
+        ) ?: return
+        if (projection.distanceFromRouteMeters > NAVIGATION_ROUTE_MATCH_DISTANCE_METERS) return
+
+        val distanceToDestinationMeters = LocationAndOrientationTracker.calculateDistanceMeters(
+            pose.latitude,
+            pose.longitude,
+            route.target.latitude,
+            route.target.longitude
+        )
+        val nextProgressFraction = if (distanceToDestinationMeters <= 20.0) {
+            1.0
+        } else {
+            maxOf(route.progressFraction, projection.progressFraction)
+        }
+        if (nextProgressFraction <= route.progressFraction + 0.0005) return
+
+        _uiState.update { latestState ->
+            val latestRoute = latestState.activeNavigationRoute
+            if (latestState.isNavigationPaused || latestRoute?.routeId != route.routeId) {
+                latestState
+            } else {
+                latestState.copy(
+                    activeNavigationRoute = latestRoute.copy(progressFraction = nextProgressFraction)
+                )
+            }
+        }
+    }
+
+    fun toggleNavigationPause() {
+        val state = _uiState.value
+        if (state.navigationTarget == null || state.activeNavigationRoute == null) return
+        val isResuming = state.isNavigationPaused
+        _uiState.update { current ->
+            if (current.navigationTarget == null || current.activeNavigationRoute == null) {
+                current
+            } else {
+                current.copy(isNavigationPaused = !current.isNavigationPaused)
+            }
+        }
+        if (isResuming) updateNavigationProgress(spatialPose.value)
     }
 
     fun recalculateNavigationRoute() {
@@ -790,6 +930,7 @@ class SightseeingAppViewModel(application: Application) : AndroidViewModel(appli
             it.copy(
                 navigationTarget = null,
                 activeNavigationRoute = null,
+                isNavigationPaused = false,
                 isCalculatingRoute = false,
                 navigationError = null
             )

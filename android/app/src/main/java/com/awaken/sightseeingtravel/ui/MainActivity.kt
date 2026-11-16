@@ -61,6 +61,7 @@ import com.awaken.sightseeingtravel.ui.admin.ArModelCreationDialog
 import com.awaken.sightseeingtravel.ui.ar.ArCameraScreen
 import com.awaken.sightseeingtravel.ui.ar.ArSelfieCaptureScreen
 import com.awaken.sightseeingtravel.ui.map.OpenFreeMapComposeView
+import kotlin.math.roundToInt
 
 private enum class AppDestination {
     MAIN_TABS,
@@ -1578,7 +1579,7 @@ private fun ExploreMapTabContent(
     var compassResetTrigger by remember { mutableIntStateOf(0) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 1. MapLibre + OpenFreeMap/Bright Vector Tile Map View
+        // 1. MapLibre + OpenFreeMap dark vector tile navigation map
         OpenFreeMapComposeView(
             spatialPose = spatialPose,
             pois = uiState.nearbyPois,
@@ -1589,6 +1590,7 @@ private fun ExploreMapTabContent(
             navigationRoute = uiState.activeNavigationRoute,
             navigationTravelMode = uiState.navigationTravelMode,
             isNavigationActive = uiState.navigationTarget != null,
+            isNavigationPaused = uiState.isNavigationPaused,
             compassResetTrigger = compassResetTrigger,
             onCameraBearingChanged = { mapBearingDegrees = it },
             navigationSessionKey = uiState.navigationTarget?.let {
@@ -1600,7 +1602,7 @@ private fun ExploreMapTabContent(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Nearby places and language controls.
+        // 2. Brand, destination, nearby places, and language controls.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1609,7 +1611,7 @@ private fun ExploreMapTabContent(
         ) {
             Surface(
                 shape = RoundedCornerShape(22.dp),
-                color = BrandColors.Paper.copy(alpha = 0.97f),
+                color = if (uiState.navigationTarget != null) Color(0xEC111B2B) else BrandColors.Paper.copy(alpha = 0.97f),
                 shadowElevation = 8.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -1625,10 +1627,19 @@ private fun ExploreMapTabContent(
                         )
                         Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Dấu Viễn Du", color = BrandColors.Primary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                if (isEn) "${uiState.nearbyPois.size} nearby places" else "${uiState.nearbyPois.size} địa điểm quanh bạn",
-                                color = BrandColors.MutedText,
+                                "Dấu Viễn Du",
+                                color = if (uiState.navigationTarget != null) Color(0xFFFFF1DC) else BrandColors.Primary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                uiState.navigationTarget?.title ?: if (isEn) {
+                                    "${uiState.nearbyPois.size} nearby places"
+                                } else {
+                                    "${uiState.nearbyPois.size} địa điểm quanh bạn"
+                                },
+                                color = if (uiState.navigationTarget != null) Color(0xFFB6C3D3) else BrandColors.MutedText,
                                 fontSize = 11.sp
                             )
                         }
@@ -1636,46 +1647,52 @@ private fun ExploreMapTabContent(
                             onClick = { viewModel.setLanguage(if (isEn) "vi" else "en") },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                         ) {
-                            Text(if (isEn) "EN" else "VI", color = BrandColors.Primary, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (isEn) "EN" else "VI",
+                                color = if (uiState.navigationTarget != null) Color(0xFF2AD7E5) else BrandColors.Primary,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
-                    if (uiState.nearbyPois.isEmpty()) {
-                        Text(
-                            if (isEn) "No nearby places" else "Chưa có địa điểm gần đây",
-                            color = BrandColors.MutedText,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    } else {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(uiState.nearbyPois, key = { it.id }) { poi ->
-                                val chipShape = RoundedCornerShape(16.dp)
-                                Surface(
-                                    modifier = Modifier
-                                        .clip(chipShape)
-                                        .clickable { onSelectPoi(poi) },
-                                    shape = chipShape,
-                                    color = BrandColors.Cream
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                    if (uiState.navigationTarget == null) {
+                        if (uiState.nearbyPois.isEmpty()) {
+                            Text(
+                                if (isEn) "No nearby places" else "Chưa có địa điểm gần đây",
+                                color = BrandColors.MutedText,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        } else {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(uiState.nearbyPois, key = { it.id }) { poi ->
+                                    val chipShape = RoundedCornerShape(16.dp)
+                                    Surface(
+                                        modifier = Modifier
+                                            .clip(chipShape)
+                                            .clickable { onSelectPoi(poi) },
+                                        shape = chipShape,
+                                        color = BrandColors.Cream
                                     ) {
-                                        Icon(
-                                            Icons.Default.LocationOn,
-                                            contentDescription = null,
-                                            tint = BrandColors.Primary,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            poi.title,
-                                            color = BrandColors.PrimaryDeep,
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                Icons.Default.LocationOn,
+                                                contentDescription = null,
+                                                tint = BrandColors.Primary,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                poi.title,
+                                                color = BrandColors.PrimaryDeep,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1793,38 +1810,56 @@ private fun ExploreMapTabContent(
         }
 
         uiState.navigationTarget?.let { target ->
+            val route = uiState.activeNavigationRoute
+            val progress = route?.progressFraction?.toFloat()?.coerceIn(0f, 1f) ?: 0f
+            val remainingDistanceMeters = route?.let {
+                (it.distanceMeters * (1.0 - it.progressFraction)).coerceAtLeast(0.0)
+            }
+            val remainingDurationSeconds = route?.let {
+                (it.durationSeconds * (1.0 - it.progressFraction)).coerceAtLeast(0.0)
+            }
+            val hasArrived = progress >= 1f
+            val navigationStatus = when {
+                uiState.isCalculatingRoute -> if (isEn) "Calculating route" else "Đang tính tuyến"
+                uiState.navigationError != null -> if (isEn) "Route unavailable" else "Chưa có tuyến đường"
+                hasArrived -> if (isEn) "Arrived" else "Đã đến nơi"
+                uiState.isNavigationPaused -> if (isEn) "Paused" else "Đã tạm dừng"
+                route != null -> if (isEn) "Navigation in progress" else "Đang dẫn đường"
+                else -> if (isEn) "Preparing route" else "Đang chuẩn bị tuyến"
+            }
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = Color.White,
+                shape = RoundedCornerShape(24.dp),
+                color = Color(0xF2111B2B),
                 shadowElevation = 12.dp
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Directions,
                             contentDescription = null,
-                            tint = BrandColors.Terracotta,
-                            modifier = Modifier.size(20.dp)
+                            tint = Color(0xFF2AD7E5),
+                            modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (isEn) "Route to pin" else "Dẫn đường đến pin",
-                                fontSize = 12.sp,
-                                color = BrandColors.MutedText,
+                                text = navigationStatus.uppercase(),
+                                fontSize = 9.sp,
+                                letterSpacing = 0.8.sp,
+                                color = Color(0xFF9FB0C4),
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = target.title,
-                                fontSize = 16.sp,
-                                color = BrandColors.PrimaryDeep,
+                                fontSize = 15.sp,
+                                color = Color(0xFFFFF1DC),
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1832,11 +1867,12 @@ private fun ExploreMapTabContent(
                         }
                         IconButton(
                             onClick = viewModel::clearNavigation,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = if (isEn) "End route" else "Kết thúc dẫn đường"
+                                contentDescription = if (isEn) "End route" else "Kết thúc dẫn đường",
+                                tint = Color(0xFFB6C3D3)
                             )
                         }
                     }
@@ -1851,77 +1887,141 @@ private fun ExploreMapTabContent(
                         uiState.isCalculatingRoute -> {
                             LinearProgressIndicator(
                                 modifier = Modifier.fillMaxWidth(),
-                                color = BrandColors.Terracotta
+                                color = Color(0xFF2AD7E5),
+                                trackColor = Color(0xFF29364A)
                             )
                             Text(
                                 text = if (isEn) "Calculating the route…" else "Đang tính tuyến đường…",
                                 fontSize = 12.sp,
-                                color = BrandColors.MutedText
+                                color = Color(0xFFB6C3D3)
                             )
                         }
                         uiState.navigationError != null -> {
                             Text(
                                 text = uiState.navigationError,
                                 fontSize = 12.sp,
-                                color = BrandColors.Error
+                                color = Color(0xFFFF9A87)
                             )
                         }
-                        uiState.activeNavigationRoute != null -> {
-                            val route = uiState.activeNavigationRoute
+                        route != null -> {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(20.dp)
+                                verticalAlignment = Alignment.Bottom,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        if (isEn) "DISTANCE" else "QUÃNG ĐƯỜNG",
-                                        fontSize = 10.sp,
-                                        color = BrandColors.MutedText
+                                        text = "${(progress * 100).roundToInt()}%",
+                                        fontSize = 34.sp,
+                                        lineHeight = 36.sp,
+                                        color = Color(0xFFFFF1DC),
+                                        fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        formatDistanceLabel(route.distanceMeters),
-                                        fontWeight = FontWeight.Bold,
-                                        color = BrandColors.PrimaryDeep
-                                    )
-                                }
-                                Column {
-                                    Text(
-                                        if (isEn) "EST. TIME" else "THỜI GIAN ƯỚC TÍNH",
-                                        fontSize = 10.sp,
-                                        color = BrandColors.MutedText
-                                    )
-                                    Text(
-                                        formatDurationLabel(route.durationSeconds, isEn),
-                                        fontWeight = FontWeight.Bold,
-                                        color = BrandColors.PrimaryDeep
+                                        text = if (isEn) "ROUTE COMPLETE" else "ĐÃ HOÀN THÀNH",
+                                        fontSize = 9.sp,
+                                        letterSpacing = 0.7.sp,
+                                        color = Color(0xFF9FB0C4),
+                                        fontWeight = FontWeight.Medium
                                     )
                                 }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = if (isEn) "REMAINING" else "CÒN LẠI",
+                                        fontSize = 9.sp,
+                                        letterSpacing = 0.7.sp,
+                                        color = Color(0xFF9FB0C4)
+                                    )
+                                    Text(
+                                        text = formatDistanceLabel(remainingDistanceMeters ?: 0.0),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF2AD7E5)
+                                    )
+                                    Text(
+                                        text = if (hasArrived) {
+                                            if (isEn) "0 min" else "0 phút"
+                                        } else {
+                                            formatDurationLabel(remainingDurationSeconds ?: 0.0, isEn)
+                                        },
+                                        fontSize = 12.sp,
+                                        color = Color(0xFFCFD8E5)
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(7.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(0xFF2B384D))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(progress)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color(0xFF2AD7E5))
+                                )
                             }
                         }
                         else -> Text(
                             text = if (isEn) "Preparing route…" else "Đang chuẩn bị tuyến…",
                             fontSize = 12.sp,
-                            color = BrandColors.MutedText
+                            color = Color(0xFFB6C3D3)
                         )
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = onRecenterToGps) {
-                            Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(17.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (isEn) "Re-center" else "Về GPS")
+                        if (route != null && !hasArrived) {
+                            FilledTonalButton(
+                                onClick = viewModel::toggleNavigationPause,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = Color(0xFF25354B),
+                                    contentColor = Color(0xFFE6F2FF)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    if (uiState.isNavigationPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    if (uiState.isNavigationPaused) {
+                                        if (isEn) "Resume" else "Tiếp tục"
+                                    } else {
+                                        if (isEn) "Pause" else "Tạm dừng"
+                                    },
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
                         TextButton(
                             onClick = viewModel::recalculateNavigationRoute,
-                            enabled = !uiState.isCalculatingRoute
+                            enabled = !uiState.isCalculatingRoute,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                tint = Color(0xFF2AD7E5),
+                                modifier = Modifier.size(17.dp)
+                            )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (isEn) "Recalculate" else "Tính lại tuyến")
+                            Text(
+                                if (isEn) "Recalculate" else "Tính lại tuyến",
+                                color = Color(0xFFCFD8E5),
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
@@ -1984,7 +2084,7 @@ private fun NavigationTravelModeSelector(
             val isSelected = selectedMode == mode
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = if (isSelected) BrandColors.Cream else BrandColors.Sand,
+                color = if (isSelected) Color(0xFF234256) else Color(0xFF1B273A),
                 modifier = Modifier
                     .weight(1f)
                     .clickable { onSelect(mode) }
@@ -1997,7 +2097,7 @@ private fun NavigationTravelModeSelector(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = if (isSelected) BrandColors.Primary else BrandColors.MutedText,
+                        tint = if (isSelected) Color(0xFF2AD7E5) else Color(0xFF9FB0C4),
                         modifier = Modifier.size(17.dp)
                     )
                     Spacer(modifier = Modifier.width(5.dp))
@@ -2005,7 +2105,7 @@ private fun NavigationTravelModeSelector(
                         text = label,
                         fontSize = 11.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) BrandColors.Primary else BrandColors.MutedText,
+                        color = if (isSelected) Color(0xFFE6F9FB) else Color(0xFFB6C3D3),
                         maxLines = 1
                     )
                 }

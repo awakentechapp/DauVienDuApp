@@ -43,7 +43,10 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
-/** Dấu Viễn Du's branded OpenFreeMap vector style retains 3D building extrusion. */
+/** Dark OpenFreeMap vector style used by the full-screen navigation experience. */
+const val OPENFREEMAP_DARK_STYLE_URL = "https://tiles.openfreemap.org/styles/dark"
+
+/** Liberty style retained by the POI coordinate picker. */
 const val OPENFREEMAP_3D_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
 private const val MAP_3D_DEFAULT_TILT_DEGREES = 55.0
@@ -66,6 +69,7 @@ fun OpenFreeMapComposeView(
     navigationRoute: ActiveNavigationRoute?,
     navigationTravelMode: NavigationTravelMode,
     isNavigationActive: Boolean,
+    isNavigationPaused: Boolean,
     navigationSessionKey: String?,
     compassResetTrigger: Int,
     onCameraBearingChanged: (Float) -> Unit,
@@ -216,12 +220,13 @@ fun OpenFreeMapComposeView(
         spatialPose.courseDegrees,
         spatialPose.hasFreshGpsFix,
         isNavigationActive,
+        isNavigationPaused,
         isFollowingNavigation,
         mapLibreInstance,
         isStyleReady
     ) {
         val map = mapLibreInstance ?: return@LaunchedEffect
-        if (!isStyleReady || !isNavigationActive || !isFollowingNavigation || !spatialPose.hasFreshGpsFix) {
+        if (!isStyleReady || !isNavigationActive || isNavigationPaused || !isFollowingNavigation || !spatialPose.hasFreshGpsFix) {
             return@LaunchedEffect
         }
 
@@ -306,12 +311,12 @@ fun OpenFreeMapComposeView(
             modifier = Modifier.fillMaxSize(),
             factory = {
                 mapView.apply {
-                    // Raster fallback keeps the map usable if OpenFreeMap Liberty cannot load.
+                    // Raster fallback keeps the map usable if OpenFreeMap's dark vector style cannot load.
                     addOnDidFailLoadingMapListener {
                         mapLibreInstance?.setStyle(
                             Style.Builder().fromJson(buildOpenStreetMapFallbackStyleJson())
                         ) { fallbackStyle ->
-                            setupCustomPinBitmapsAndLayers(context, fallbackStyle)
+                            setupCustomPinBitmapsAndLayers(context, fallbackStyle, isDarkMap = false)
                             isStyleReady = true
                             updateGeoJsonLayers(
                                 style = fallbackStyle,
@@ -418,9 +423,12 @@ private const val LAYER_POI_PINS = "layer-poi-pins"
 private const val SOURCE_POI_SELECTED = "source-poi-selected"
 private const val LAYER_POI_SELECTED = "layer-poi-selected"
 
-private const val SOURCE_NAVIGATION_ROUTE = "source-navigation-route"
-private const val LAYER_NAVIGATION_ROUTE_CASING = "layer-navigation-route-casing"
-private const val LAYER_NAVIGATION_ROUTE = "layer-navigation-route"
+private const val SOURCE_NAVIGATION_ROUTE_REMAINING = "source-navigation-route-remaining"
+private const val SOURCE_NAVIGATION_ROUTE_COMPLETED = "source-navigation-route-completed"
+private const val LAYER_NAVIGATION_ROUTE_REMAINING_CASING = "layer-navigation-route-remaining-casing"
+private const val LAYER_NAVIGATION_ROUTE_COMPLETED_CASING = "layer-navigation-route-completed-casing"
+private const val LAYER_NAVIGATION_ROUTE_REMAINING = "layer-navigation-route-remaining"
+private const val LAYER_NAVIGATION_ROUTE_COMPLETED = "layer-navigation-route-completed"
 
 private const val PROP_POI_ID = "poi_id"
 private const val PROP_POI_TITLE = "poi_title"
@@ -438,25 +446,15 @@ private fun poiMarkerIconKey(category: String, markerState: PoiMarkerState): Str
     "icon-poi-${PoiCategoryLabels.normalize(category)}-${markerState.name.lowercase()}"
 
 /**
- * Loads the local Dấu Viễn Du map style. It uses OpenFreeMap vector tiles and fonts,
- * while keeping the branded palette under the app's control instead of a hosted style URL.
+ * Loads OpenFreeMap's dark vector style for the MapLibre navigation experience.
  */
 private fun loadDauVienDuBrandStyle(
     context: Context,
     map: MapLibreMap,
     onStyleReady: (Style) -> Unit
 ) {
-    val styleBuilder = runCatching {
-        val styleJson = context.assets.open("map_style_dauviendu.json")
-            .bufferedReader()
-            .use { it.readText() }
-        Style.Builder().fromJson(styleJson)
-    }.getOrElse {
-        Style.Builder().fromUri(OPENFREEMAP_3D_STYLE_URL)
-    }
-
-    map.setStyle(styleBuilder) { style ->
-        setupCustomPinBitmapsAndLayers(context, style)
+    map.setStyle(Style.Builder().fromUri(OPENFREEMAP_DARK_STYLE_URL)) { style ->
+        setupCustomPinBitmapsAndLayers(context, style, isDarkMap = true)
         onStyleReady(style)
     }
 }
@@ -490,8 +488,10 @@ fun buildOpenStreetMapFallbackStyleJson(): String = """
 }
 """.trimIndent()
 
-private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
+private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style, isDarkMap: Boolean) {
     val density = context.resources.displayMetrics.density
+    val poiLabelColor = Color.parseColor(if (isDarkMap) "#FFF1DC" else "#622821")
+    val poiLabelHaloColor = Color.parseColor(if (isDarkMap) "#0B1421" else "#FFFFFF")
     style.addImage(ICON_USER_GPS, createUserGpsDotBitmap(density))
     style.addImage(ICON_NAVIGATION_WALKING, createNavigationMarkerBitmap(density, NavigationTravelMode.WALKING))
     style.addImage(ICON_NAVIGATION_CAR, createNavigationMarkerBitmap(density, NavigationTravelMode.CAR))
@@ -510,24 +510,49 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
         }
     }
 
-    if (style.getSource(SOURCE_NAVIGATION_ROUTE) == null) {
-        style.addSource(GeoJsonSource(SOURCE_NAVIGATION_ROUTE))
+    if (style.getSource(SOURCE_NAVIGATION_ROUTE_REMAINING) == null) {
+        style.addSource(GeoJsonSource(SOURCE_NAVIGATION_ROUTE_REMAINING))
     }
-    if (style.getLayer(LAYER_NAVIGATION_ROUTE_CASING) == null) {
+    if (style.getSource(SOURCE_NAVIGATION_ROUTE_COMPLETED) == null) {
+        style.addSource(GeoJsonSource(SOURCE_NAVIGATION_ROUTE_COMPLETED))
+    }
+    if (style.getLayer(LAYER_NAVIGATION_ROUTE_REMAINING_CASING) == null) {
         style.addLayer(
-            LineLayer(LAYER_NAVIGATION_ROUTE_CASING, SOURCE_NAVIGATION_ROUTE).withProperties(
-                lineColor(Color.WHITE),
-                lineWidth(9.0f),
-                lineOpacity(0.96f),
+            LineLayer(LAYER_NAVIGATION_ROUTE_REMAINING_CASING, SOURCE_NAVIGATION_ROUTE_REMAINING).withProperties(
+                lineColor(Color.parseColor("#172538")),
+                lineWidth(10.0f),
+                lineOpacity(0.95f),
                 lineCap("round"),
                 lineJoin("round")
             )
         )
     }
-    if (style.getLayer(LAYER_NAVIGATION_ROUTE) == null) {
+    if (style.getLayer(LAYER_NAVIGATION_ROUTE_COMPLETED_CASING) == null) {
         style.addLayer(
-            LineLayer(LAYER_NAVIGATION_ROUTE, SOURCE_NAVIGATION_ROUTE).withProperties(
-                lineColor(Color.parseColor("#4285F4")),
+            LineLayer(LAYER_NAVIGATION_ROUTE_COMPLETED_CASING, SOURCE_NAVIGATION_ROUTE_COMPLETED).withProperties(
+                lineColor(Color.parseColor("#172538")),
+                lineWidth(10.0f),
+                lineOpacity(0.95f),
+                lineCap("round"),
+                lineJoin("round")
+            )
+        )
+    }
+    if (style.getLayer(LAYER_NAVIGATION_ROUTE_REMAINING) == null) {
+        style.addLayer(
+            LineLayer(LAYER_NAVIGATION_ROUTE_REMAINING, SOURCE_NAVIGATION_ROUTE_REMAINING).withProperties(
+                lineColor(Color.parseColor("#EF795F")),
+                lineWidth(5.5f),
+                lineOpacity(0.98f),
+                lineCap("round"),
+                lineJoin("round")
+            )
+        )
+    }
+    if (style.getLayer(LAYER_NAVIGATION_ROUTE_COMPLETED) == null) {
+        style.addLayer(
+            LineLayer(LAYER_NAVIGATION_ROUTE_COMPLETED, SOURCE_NAVIGATION_ROUTE_COMPLETED).withProperties(
+                lineColor(Color.parseColor("#27D9E7")),
                 lineWidth(5.5f),
                 lineOpacity(0.98f),
                 lineCap("round"),
@@ -550,8 +575,8 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
                 textSize(12.5f),
                 textFont(arrayOf("Noto Sans Regular")),
                 textOffset(arrayOf(0f, 1.8f)),
-                textColor(Color.parseColor("#622821")),
-                textHaloColor(Color.WHITE),
+                textColor(poiLabelColor),
+                textHaloColor(poiLabelHaloColor),
                 textHaloWidth(2.8f)
             )
         )
@@ -571,8 +596,8 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
                 textSize(13.5f),
                 textFont(arrayOf("Noto Sans Bold")),
                 textOffset(arrayOf(0f, 2.2f)),
-                textColor(Color.parseColor("#622821")),
-                textHaloColor(Color.WHITE),
+                textColor(poiLabelColor),
+                textHaloColor(poiLabelHaloColor),
                 textHaloWidth(1.4f)
             )
         )
@@ -595,6 +620,71 @@ private fun setupCustomPinBitmapsAndLayers(context: Context, style: Style) {
     }
 }
 
+private fun splitNavigationRoute(
+    coordinates: List<com.awaken.sightseeingtravel.core.model.RouteCoordinateDto>,
+    progressFraction: Double
+): Pair<List<com.awaken.sightseeingtravel.core.model.RouteCoordinateDto>, List<com.awaken.sightseeingtravel.core.model.RouteCoordinateDto>> {
+    if (coordinates.size < 2) return emptyList<com.awaken.sightseeingtravel.core.model.RouteCoordinateDto>() to emptyList()
+
+    val segmentLengths = coordinates.zipWithNext { start, end ->
+        LocationAndOrientationTracker.calculateDistanceMeters(
+            start.latitude,
+            start.longitude,
+            end.latitude,
+            end.longitude
+        )
+    }
+    val totalLengthMeters = segmentLengths.sum()
+    if (totalLengthMeters <= 0.0) return emptyList<com.awaken.sightseeingtravel.core.model.RouteCoordinateDto>() to coordinates
+
+    val targetLengthMeters = totalLengthMeters * progressFraction.coerceIn(0.0, 1.0)
+    // Keep the origin in the completed geometry so the cyan line renders from
+    // the start of the route as soon as GPS progress advances.
+    val completed = mutableListOf(coordinates.first())
+    var traversedMeters = 0.0
+
+    for (index in segmentLengths.indices) {
+        val start = coordinates[index]
+        val end = coordinates[index + 1]
+        val segmentLength = segmentLengths[index]
+        if (targetLengthMeters <= traversedMeters + 0.01) {
+            return completed to coordinates.drop(index)
+        }
+
+        val nextDistance = traversedMeters + segmentLength
+        if (targetLengthMeters >= nextDistance - 0.01) {
+            completed += end
+            traversedMeters = nextDistance
+            continue
+        }
+
+        val fraction = if (segmentLength <= 0.0) 0.0 else {
+            ((targetLengthMeters - traversedMeters) / segmentLength).coerceIn(0.0, 1.0)
+        }
+        val current = com.awaken.sightseeingtravel.core.model.RouteCoordinateDto(
+            latitude = start.latitude + (end.latitude - start.latitude) * fraction,
+            longitude = start.longitude + (end.longitude - start.longitude) * fraction
+        )
+        completed += current
+        return completed to (listOf(current) + coordinates.drop(index + 1))
+    }
+
+    return coordinates to emptyList()
+}
+
+private fun setNavigationRouteSegment(
+    source: GeoJsonSource?,
+    coordinates: List<com.awaken.sightseeingtravel.core.model.RouteCoordinateDto>
+) {
+    if (source == null) return
+    val points = coordinates.map { Point.fromLngLat(it.longitude, it.latitude) }
+    if (points.size >= 2) {
+        source.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(points)))
+    } else {
+        source.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+    }
+}
+
 private fun updateGeoJsonLayers(
     style: Style,
     spatialPose: DeviceSpatialPose,
@@ -604,15 +694,20 @@ private fun updateGeoJsonLayers(
     navigationTravelMode: NavigationTravelMode,
     isNavigationActive: Boolean
 ) {
-    val routeSource = style.getSourceAs<GeoJsonSource>(SOURCE_NAVIGATION_ROUTE)
-    val routePoints = navigationRoute?.coordinates.orEmpty().map {
-        Point.fromLngLat(it.longitude, it.latitude)
-    }
-    if (routePoints.size >= 2) {
-        routeSource?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(routePoints)))
+    val route = navigationRoute
+    val routeSegments = if (route == null) {
+        emptyList<com.awaken.sightseeingtravel.core.model.RouteCoordinateDto>() to emptyList()
     } else {
-        routeSource?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+        splitNavigationRoute(route.coordinates, route.progressFraction)
     }
+    setNavigationRouteSegment(
+        style.getSourceAs<GeoJsonSource>(SOURCE_NAVIGATION_ROUTE_COMPLETED),
+        routeSegments.first
+    )
+    setNavigationRouteSegment(
+        style.getSourceAs<GeoJsonSource>(SOURCE_NAVIGATION_ROUTE_REMAINING),
+        routeSegments.second
+    )
 
     val gpsSource = style.getSourceAs<GeoJsonSource>(SOURCE_USER_GPS)
     if (spatialPose.hasFreshGpsFix || spatialPose.isSimulatedLocation) {
